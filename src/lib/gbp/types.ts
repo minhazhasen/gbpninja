@@ -44,7 +44,9 @@ export type DailyMetric =
 
 export interface MetricPoint {
   date: string; // YYYY-MM-DD
-  impressions: number;
+  impressions: number; // searchImpressions + mapsImpressions
+  searchImpressions: number;
+  mapsImpressions: number;
   calls: number;
   websiteClicks: number;
   directions: number;
@@ -73,5 +75,5 @@ export interface GbpProvider {
   replyToReview(locationId: string, reviewId: string, comment: string): Promise<Review>;
   getMetrics(locationId: string, days: number): Promise<MetricPoint[]>;
   listPosts(locationId: string): Promise<LocalPost[]>;
-  createPost(post: Omit<LocalPost, "id" | "status">): Promise<LocalPost>;
+  createPost(post: Omit<LocalPost, "id" | "status"> & { status?: "DRAFT" | "SCHEDULED" }): Promise<LocalPost>;
 }
