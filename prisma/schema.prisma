@@ -1,0 +1,51 @@
+// SQLite for local/cloud dev. Switch provider to "postgresql" for production.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Posts queued in the content calendar. The GBP API has no native scheduling,
+// so a cron job publishes rows whose scheduledFor has passed.
+model ScheduledPost {
+  id           String   @id @default(cuid())
+  locationId   String
+  type         String   // STANDARD | EVENT | OFFER
+  summary      String
+  ctaType      String?
+  ctaUrl       String?
+  mediaUrl     String?
+  scheduledFor DateTime
+  status       String   @default("SCHEDULED") // DRAFT | SCHEDULED | PUBLISHED | FAILED
+  googlePostId String?
+  error        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status, scheduledFor])
+}
+
+// Reusable review reply templates, e.g. per star rating.
+model ReplyTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  minRating Int      @default(1)
+  maxRating Int      @default(5)
+  body      String
+  createdAt DateTime @default(now())
+}
+
+// History of profile audits, for score trends over time.
+model AuditSnapshot {
+  id         String   @id @default(cuid())
+  locationId String
+  score      Int
+  issues     String   // JSON-encoded AuditIssue[]
+  createdAt  DateTime @default(now())
+
+  @@index([locationId, createdAt])
+}

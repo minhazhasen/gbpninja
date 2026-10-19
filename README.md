@@ -1,36 +1,31 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Google Business Profile Manager
 
-## Getting Started
+Manage Google Business Profiles in one place:
 
-First, run the development server:
+- **Dashboard** — impressions, actions, rating, unreplied reviews and audit score at a glance
+- **Performance** — 90-day impressions and customer actions (calls, website clicks, directions)
+- **Reviews** — filter, see what needs a reply, and reply with suggested responses
+- **Content calendar** — month view of posts; schedule updates, offers and events
+- **Profile audit** — weighted 0–100 score with issues by severity, plus a quick-fix form
+
+Runs on demo data out of the box — no Google account needed.
+
+## Getting started
 
 ```bash
+npm install
+npm run setup
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Connecting real Google Business Profiles
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. In Google Cloud Console, create a project and [request GBP API access](https://developers.google.com/my-business/content/prereqs).
+2. Enable: My Business Account Management, Business Information, Business Profile Performance, and Google My Business API (v4).
+3. Create an OAuth client (Web) with redirect URI `http://localhost:3000/api/auth/callback/google`.
+4. Put `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` in `.env.local` and set `GBP_DATA_SOURCE=google`.
+5. Implement the methods in `src/lib/gbp/google.ts`.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+See [CLAUDE.md](CLAUDE.md) for architecture and conventions.
