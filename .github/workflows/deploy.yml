@@ -1,6 +1,8 @@
 name: Deploy app.gbpninja.com
 
-# Push to main → check → build a standalone Next.js server → FTPS upload to the cPanel Node.js app folder → restart.
+# Push to main → check → build a standalone Next.js server → pack it as ONE archive → FTPS upload (3 files) → restart.
+# On start, deploy/server.js (the cPanel startup file) unpacks app.tar.gz into ./app and runs it. Uploading the ~2,000 loose
+# files one by one over FTPS took over an hour on this host; one archive takes a minute.
 # Secrets: FTP_SERVER, FTP_USERNAME, FTP_PASSWORD (FTP account rooted at the app folder, e.g. ~/app.gbpninja.com/deploy).
 # Variables: NEXT_PUBLIC_FIREBASE_* (built into the browser bundle). Server-only keys live in cPanel → Setup Node.js App.
 
@@ -11,7 +13,8 @@ on:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false
+  # A newer push replaces a deploy still uploading.
+  cancel-in-progress: true
 
 jobs:
   deploy:
@@ -43,20 +46,23 @@ jobs:
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
           NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
 
-      # server.js + trimmed node_modules (incl. the rhel-openssl-1.1.x Prisma engine) + static assets + public files.
+      # bundle/ = server.js + trimmed node_modules (incl. the rhel-openssl-1.1.x Prisma engine) + static assets + public files,
+      # packed into release/app.tar.gz next to the loader (deploy/server.js) and the release id.
       # tmp/restart.txt changes every deploy, which tells LiteSpeed / Passenger to restart the Node.js app.
       - name: Assemble release
         run: |
-          mkdir -p release
-          cp -a .next/standalone/. release/
-          mkdir -p release/.next
-          cp -a .next/static release/.next/static
-          cp -a public release/public
-          rm -f release/.env release/.env.*
-          mkdir -p release/tmp
+          mkdir -p bundle/.next release/tmp
+          cp -a .next/standalone/. bundle/
+          cp -a .next/static bundle/.next/static
+          cp -a public bundle/public
+          rm -f bundle/.env bundle/.env.*
+          test -f bundle/server.js
+          ls bundle/node_modules/.prisma/client | grep -q rhel-openssl-1.1.x
+          tar -czf release/app.tar.gz -C bundle .
+          cp deploy/server.js release/server.js
+          echo "${{ github.sha }}" > release/release.txt
           echo "${{ github.sha }} $(date -u +%FT%TZ)" > release/tmp/restart.txt
-          test -f release/server.js
-          ls release/node_modules/.prisma/client | grep -q rhel-openssl-1.1.x
+          ls -la release release/tmp
 
       - name: Upload to cPanel
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5

@@ -19,6 +19,8 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      // cPanel start-up loader: plain CommonJS by design (see deploy/server.js).
+      "deploy/**",
     ],
   },
 ];

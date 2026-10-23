@@ -5,9 +5,12 @@ and every push to `main` is built on GitHub and uploaded over FTPS by `.github/w
 
 ```
 GitHub push → npm ci → schema SQL → typecheck + lint → next build (standalone)
-            → release/ = server.js + node_modules + .next/static + public + tmp/restart.txt
-            → FTPS upload to ~/app.gbpninja.com/deploy → app restarts (restart.txt changed)
+            → app.tar.gz (server.js + node_modules + .next/static + public, ~40 MB)
+            → FTPS upload of 4 files to ~/app.gbpninja.com/deploy: server.js (loader), app.tar.gz, release.txt, tmp/restart.txt
+            → app restarts → deploy/server.js unpacks app.tar.gz into ./app (when release.txt changed) → runs app/server.js
 ```
+
+One archive instead of ~2,000 loose files: FTPS on this host costs ~2 s per file. The previous release stays in `app.prev`.
 
 ## 1. GitHub (once)
 
@@ -37,7 +40,7 @@ Repo → Settings → Secrets and variables → Actions.
 | Application URL | `app.gbpninja.com` |
 | Application startup file | `server.js` |
 
-Don't press *Run NPM Install* — the upload already contains the `node_modules` the server needs.
+Don't press *Run NPM Install* — the archive already contains the `node_modules` the server needs.
 
 **Environment variables** (server-only; never put these in GitHub):
 
