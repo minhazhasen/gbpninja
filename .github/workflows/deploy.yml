@@ -1,0 +1,75 @@
+name: Deploy app.gbpninja.com
+
+# Push to main → check → build a standalone Next.js server → FTPS upload to the cPanel Node.js app folder → restart.
+# Secrets: FTP_SERVER, FTP_USERNAME, FTP_PASSWORD (FTP account rooted at the app folder, e.g. ~/app.gbpninja.com/deploy).
+# Variables: NEXT_PUBLIC_FIREBASE_* (built into the browser bundle). Server-only keys live in cPanel → Setup Node.js App.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Schema SQL
+        run: npm run db:sql
+
+      - name: Check
+        run: npm run typecheck && npm run lint
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ vars.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
+
+      # server.js + trimmed node_modules (incl. the rhel-openssl-1.1.x Prisma engine) + static assets + public files.
+      # tmp/restart.txt changes every deploy, which tells LiteSpeed / Passenger to restart the Node.js app.
+      - name: Assemble release
+        run: |
+          mkdir -p release
+          cp -a .next/standalone/. release/
+          mkdir -p release/.next
+          cp -a .next/static release/.next/static
+          cp -a public release/public
+          rm -f release/.env release/.env.*
+          mkdir -p release/tmp
+          echo "${{ github.sha }} $(date -u +%FT%TZ)" > release/tmp/restart.txt
+          test -f release/server.js
+          ls release/node_modules/.prisma/client | grep -q rhel-openssl-1.1.x
+
+      - name: Upload to cPanel
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          timeout: 120000
+          local-dir: ./release/
+          server-dir: ./
+          # The default exclude list skips node_modules, which the standalone server needs.
+          exclude: |
+            **/.git*
+            **/.git*/**

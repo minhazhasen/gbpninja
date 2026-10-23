@@ -15,6 +15,9 @@ a content calendar for posts, and a profile audit with in-app fixes.
 - `npm run setup` — create `.env.local`, install, push DB schema (runs automatically on session start)
 - `npm run dev` — http://localhost:3000 (Turbopack; pages compile in ~0.3 s on first visit vs 1–3 s with webpack)
 - `npm run typecheck` / `npm run lint` / `npm run build` — run all three before committing
+- `npm run db:sql` — regenerate `prisma/schema.sql` after changing `prisma/schema.prisma` (the server creates missing tables from it)
+- Deploy: push to `main` → `.github/workflows/deploy.yml` builds `output: "standalone"` and uploads over FTPS to the cPanel Node.js app
+  (`~/app.gbpninja.com/deploy`, startup `server.js`, Node 22). Setup, secrets and server env vars: `DEPLOY.md`.
 
 ## Auth
 - `/login` (`src/app/login/`, `?mode=signup` opens Sign up): left = `app-preview.tsx` (real Dashboard screenshots `public/brand/app-preview-light/dark.webp`, 1440×900 @2× cropped above the sidebar user card, swapped by `.dark`, fills the full-height panel with object-cover from the top-left; retake after big UI changes), right =
