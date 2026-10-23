@@ -18,7 +18,7 @@ import { GoogleApiError, disconnectGoogle, googleAccount, googleFetch } from "@/
 import type { KeywordMonth } from "@/lib/keywords";
 import { channelMedia, emptyDraft, postStatusFromResults, type Channel, type CtaType, type Post } from "@/lib/posts";
 import { publicMediaUrl } from "@/lib/public-media";
-import { mockProvider, publishMeta, syncPhotoStats, workspace } from "./mock";
+import { mockProvider, publishLinkedin, publishMeta, syncPhotoStats, workspace } from "./mock";
 import { resolveTenant, saveTenant } from "./tenancy";
 import { currentTenant, runInTenant } from "./tenant-context";
 import type {
@@ -1066,7 +1066,8 @@ const live: Partial<GbpProvider> = {
         // Not a valid URL: leave it for the picker.
       }
     }
-    workspace.searchConsole = { status: "connected", account: email ?? (await googleAccount("searchconsole"))?.email ?? null, connectedAt: now(), sites };
+    const by = await getSessionUser().catch(() => null);
+    workspace.searchConsole = { status: "connected", account: email ?? (await googleAccount("searchconsole"))?.email ?? null, connectedAt: now(), connectedBy: by ? by.name || by.email : null, sites };
     return live.getSearchConsole!();
   },
   async listSearchConsoleProperties() {
@@ -1160,8 +1161,9 @@ const live: Partial<GbpProvider> = {
         results[ch] = live ? await publishMeta(post, ch) : { status: "failed", error: `Connect ${ch === "facebook" ? "a Facebook Page" : "Instagram"} in Settings → Accounts` };
         continue;
       }
-      if (ch !== "google") {
-        results[ch] = { status: "failed", error: `Publishing to ${ch} isn't connected yet` };
+      if (ch === "linkedin") {
+        const live = workspace.connections.some((c) => c.channel === "linkedin" && c.status === "connected");
+        results.linkedin = live ? await publishLinkedin(post) : { status: "failed", error: "Connect LinkedIn in Settings → Accounts" };
         continue;
       }
       try {

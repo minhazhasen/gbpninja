@@ -33,24 +33,21 @@ const PURPOSE: Record<Channel, string> = {
   google: "Reviews, performance, posts and profile edits for your locations",
   facebook: "Publish posts to your Facebook Page",
   instagram: "Publish to an Instagram business account linked to a Facebook Page",
-  linkedin: "Post to your LinkedIn profile or Company Page",
-  x: "Post to your X account",
+  linkedin: "Post to your LinkedIn profile",
 };
 const PICK_TITLE: Record<Channel, string> = {
   google: "Business locations",
   facebook: "Choose a Facebook Page",
   instagram: "Choose an Instagram account",
   linkedin: "Post on LinkedIn as",
-  x: "X account",
 };
 const PENDING_STATUS: Record<Channel, string> = {
   google: "Choose locations",
   facebook: "Choose a page",
   instagram: "Choose an account",
   linkedin: "Choose an account",
-  x: "Choose an account",
 };
-const PICK_LABEL: Record<Channel, string> = { google: "Choose locations", facebook: "Choose page", instagram: "Choose account", linkedin: "Choose account", x: "Choose account" };
+const PICK_LABEL: Record<Channel, string> = { google: "Choose locations", facebook: "Choose page", instagram: "Choose account", linkedin: "Choose account" };
 
 const isLive = (c?: Connection) => !!c && c.status === "connected" && (!c.expiresAt || new Date(c.expiresAt).getTime() > Date.now());
 
@@ -78,6 +75,9 @@ export function ConnectionsBoard({
       if (what === "google") {
         toast.success("Google account connected", { description: "Choose the Business Profiles to manage." });
         setPicker("google");
+      } else if (what === "linkedin") {
+        toast.success("LinkedIn connected", { description: "Confirm the profile to post as." });
+        setPicker("linkedin");
       } else if (what === "facebook" || what === "instagram") {
         toast.success("Facebook connected", { description: what === "facebook" ? "Choose the Page to post to." : "Choose the Instagram account to post to." });
         setPicker(what);
@@ -195,10 +195,9 @@ const TARGET_NOUN: Record<Channel, [string, string]> = {
   facebook: ["Page", "Pages"],
   instagram: ["account", "accounts"],
   linkedin: ["account", "accounts"],
-  x: ["account", "accounts"],
 };
-const NETWORK: Record<Channel, string> = { google: "Google", facebook: "Facebook", instagram: "Instagram", linkedin: "LinkedIn", x: "X" };
-const CHANGE_LABEL: Record<Channel, string | null> = { google: "Locations", facebook: "Page", instagram: "Account", linkedin: "Account", x: null };
+const NETWORK: Record<Channel, string> = { google: "Google", facebook: "Facebook", instagram: "Instagram", linkedin: "LinkedIn" };
+const CHANGE_LABEL: Record<Channel, string | null> = { google: "Locations", facebook: "Page", instagram: "Account", linkedin: "Account" };
 
 /** One line per account: logo + name, status, what's linked, Change, and ⋯ (Reconnect / Disconnect). */
 function ConnectionRow({
@@ -281,7 +280,9 @@ function ConnectionRow({
         <div className="min-w-0">
           <p className="truncate font-semibold">{CONNECT_LABEL[channel]}</p>
           <p className="truncate text-xs text-muted-foreground">
-            {linked ? [conn?.account, conn?.lastSyncAt && `synced ${ago(conn.lastSyncAt)}`].filter(Boolean).join(" · ") || "Connected" : PURPOSE[channel]}
+            {linked
+              ? [conn?.account, conn?.connectedBy && `added by ${conn.connectedBy}`, conn?.lastSyncAt && `synced ${ago(conn.lastSyncAt)}`].filter(Boolean).join(" · ") || "Connected"
+              : PURPOSE[channel]}
           </p>
           {warning && (
             <p className={cn("mt-0.5 flex items-center gap-1 truncate text-xs", expired || conn?.error ? "text-destructive" : "text-warning")}>

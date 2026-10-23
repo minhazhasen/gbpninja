@@ -1,4 +1,4 @@
-import { postStatusFromResults, type Channel, type ChannelResult, type Post, type PostStats } from "../posts";
+import { CHANNELS, postStatusFromResults, type Channel, type ChannelResult, type Post, type PostStats } from "../posts";
 import { MAX_COMPETITORS, addPoint } from "../competitors";
 import { emptyDraft } from "../posts";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
@@ -30,12 +30,15 @@ import type {
 import { STARTER_TEMPLATES } from "../templates";
 import { needsFollowUpTask } from "../tasks";
 import { auditLocation } from "../audit";
+import { getSessionUser } from "../current-user";
 import { currentTenant } from "./tenant-context";
 import { disconnectGoogle, googleAccount, googleOAuthConfigured } from "../google/oauth";
 import { listGbpLocations } from "../google/business";
 import { sendGmail } from "../google/gmail";
 import { disconnectMeta, metaAccount, metaConfigured, metaPages } from "../meta/oauth";
 import { deleteFromFacebook, publishToFacebook, publishToInstagram } from "../meta/publish";
+import { disconnectLinkedin, linkedinAccount, linkedinConfigured } from "../linkedin/oauth";
+import { deleteFromLinkedin, publishToLinkedin } from "../linkedin/publish";
 
 // In-memory demo data so the app runs without Google API access.
 // State resets on server restart. It lives on globalThis so dev-mode module
@@ -385,7 +388,6 @@ function seedPosts(): Post[] {
       stats: { instagram: { ...stats(3120, 2410, null, 214, 23, null), saves: 31 } },
     }),
     imported("linkedin", -10, 9, "We're hiring", "We're hiring a dental hygienist to join our Austin team. DM us or apply on our site.", { stats: { linkedin: stats(2650, 1980, 88, 57, 11, 14) } }),
-    imported("x", -3, 15, "Saturday hours", "Open this Saturday 9–1. Walk-ins welcome!", { stats: { x: stats(940, null, 12, 18, 2, 4) } }),
   ];
 }
 
@@ -603,7 +605,6 @@ function seedConnections(): Connection[] {
       lastSyncAt: minsAgo(60 * 3),
       expiresAt: new Date(Date.now() + 9 * 86_400_000).toISOString(),
     },
-    { channel: "x", status: "not_connected", targets: [] },
   ];
 }
 
@@ -929,6 +930,26 @@ export async function publishMeta(post: Post, channel: "facebook" | "instagram")
     return { status: "published", posted_at: new Date().toISOString(), permalink: r.permalink, external_ids: [r.id] };
   } catch (e) {
     return { status: "failed", error: e instanceof Error ? e.message : `${channel} didn't accept the post` };
+  }
+}
+
+/** Publish to the connected LinkedIn profile (linkedin/publish.ts) → that channel's result. */
+export async function publishLinkedin(post: Post): Promise<ChannelResult> {
+  try {
+    const r = await publishToLinkedin(post);
+    return { status: "published", posted_at: new Date().toISOString(), permalink: r.permalink, external_ids: [r.id] };
+  } catch (e) {
+    return { status: "failed", error: e instanceof Error ? e.message : "LinkedIn didn't accept the post" };
+  }
+}
+
+/** The signed-in team member (name, else email) — recorded as who connected an account. */
+async function whoIsSignedIn(): Promise<string | null> {
+  try {
+    const u = await getSessionUser();
+    return u ? u.name || u.email : null;
+  } catch {
+    return null;
   }
 }
 
@@ -1260,22 +1281,33 @@ export const mockProvider: GbpProvider = {
         else if (c.account !== account.name && c.status !== "not_connected") Object.assign(c, { status: "needs_selection", account: account.name, targets: [], error: null });
       }
     }
-    return state.connections;
+    // Real LinkedIn app: the LinkedIn row follows the stored token (and shows its 60-day expiry).
+    if (linkedinConfigured()) {
+      const account = await linkedinAccount();
+      const c = conn("linkedin");
+      if (!account) Object.assign(c, { status: "not_connected", account: null, targets: [], connectedAt: null, lastSyncAt: null, expiresAt: null, error: null });
+      else {
+        if (c.account !== account.name && c.status !== "not_connected") Object.assign(c, { status: "needs_selection", account: account.name, targets: [], error: null });
+        c.expiresAt = account.expiresAt;
+      }
+    }
+    // Only networks the app supports (older saved workspaces can still hold an X row).
+    return state.connections.filter((c) => (CHANNELS as string[]).includes(c.channel));
   },
   async connectChannel(channel, account) {
     const c = conn(channel);
     // A real sign-in (Google, or Facebook for a Page / Instagram) passes the account: next, pick what to manage.
-    if ((channel === "google" || channel === "facebook" || channel === "instagram") && account) {
-      Object.assign(c, { account, status: "needs_selection", targets: [], connectedAt: new Date().toISOString(), lastSyncAt: null, expiresAt: null, error: null });
+    if ((channel === "google" || channel === "facebook" || channel === "instagram" || channel === "linkedin") && account) {
+      Object.assign(c, { account, connectedBy: await whoIsSignedIn(), status: "needs_selection", targets: [], connectedAt: new Date().toISOString(), lastSyncAt: null, expiresAt: null, error: null });
       return c;
     }
-    // Demo stand-in for the OAuth round trip. X posts as the signed-in account, so there's nothing to pick.
+    // Demo stand-in for the OAuth round trip.
     Object.assign(c, {
-      account: channel === "google" ? "owner@example.com" : channel === "x" ? "@sunrisedental" : "Demo User",
-      status: channel === "x" ? "connected" : "needs_selection",
-      targets: channel === "x" ? [{ id: "x-sunrise", name: "@sunrisedental" }] : c.targets,
+      account: channel === "google" ? "owner@example.com" : "Demo User",
+      status: "needs_selection",
+      targets: c.targets,
       connectedAt: new Date().toISOString(),
-      lastSyncAt: channel === "x" ? new Date().toISOString() : c.lastSyncAt,
+      lastSyncAt: c.lastSyncAt,
       expiresAt: channel === "linkedin" ? new Date(Date.now() + 60 * 86_400_000).toISOString() : null,
       error: null,
     });
@@ -1297,6 +1329,11 @@ export const mockProvider: GbpProvider = {
         disabled: p.instagram ? null : "No Instagram business account linked to this Page",
       }));
     }
+    // Real LinkedIn connection: post as the signed-in member (Company Pages need LinkedIn's Community Management API).
+    if (channel === "linkedin" && (await linkedinAccount())) {
+      const a = (await linkedinAccount())!;
+      return [{ id: `urn:li:person:${a.memberId}`, name: a.name, sub: "Your LinkedIn profile" }];
+    }
     if (channel === "facebook") return DEMO_PAGES.map((p) => ({ id: p.id, name: p.name, sub: p.ig ? `Instagram @${p.ig} linked` : "Facebook Page" }));
     if (channel === "instagram")
       return DEMO_PAGES.map((p) => ({ id: p.id, name: p.ig ? `@${p.ig}` : p.name, sub: `Via Facebook Page ${p.name}`, disabled: p.ig ? null : "No Instagram business account linked" }));
@@ -1314,6 +1351,7 @@ export const mockProvider: GbpProvider = {
   },
   async disconnectChannel(channel) {
     if (channel === "google" && googleOAuthConfigured()) await disconnectGoogle("gbp");
+    if (channel === "linkedin" && (await linkedinAccount())) await disconnectLinkedin();
     // Facebook and Instagram share one Facebook connection: revoke it when neither is left.
     if ((channel === "facebook" || channel === "instagram") && (await metaAccount())) {
       const other = conn(channel === "facebook" ? "instagram" : "facebook");
@@ -1460,6 +1498,7 @@ export const mockProvider: GbpProvider = {
       else if (!state.connections.some((x) => x.channel === c && isLive(x))) results[c] = { status: "failed", error: `${c} is not connected` };
       // Real Facebook / Instagram connection: publish for real (demo channels are only simulated).
       else if ((c === "facebook" || c === "instagram") && (await metaAccount())) results[c] = await publishMeta(post, c);
+      else if (c === "linkedin" && (await linkedinAccount())) results[c] = await publishLinkedin(post);
       else results[c] = { status: "published", posted_at: now };
     }
     post.results = results;
@@ -1476,6 +1515,8 @@ export const mockProvider: GbpProvider = {
       const pageId = state.connections.find((x) => x.channel === "facebook")?.targets[0]?.id;
       for (const ext of fb.external_ids) await deleteFromFacebook(ext, pageId);
     }
+    const li = post?.results?.linkedin;
+    if (li?.status === "published" && li.external_ids?.length && (await linkedinAccount())) for (const ext of li.external_ids) await deleteFromLinkedin(ext);
     state.posts = state.posts.filter((p) => p.id !== id);
   },
 };

@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getProvider } from "@/lib/gbp";
@@ -11,12 +11,14 @@ import { getSessionUser } from "@/lib/current-user";
 import { channelAvailable } from "@/lib/connections";
 import { googleAuthUrl, googleOAuthConfigured } from "@/lib/google/oauth";
 import { metaAuthUrl, metaConfigured } from "@/lib/meta/oauth";
+import { linkedinAuthUrl, linkedinConfigured } from "@/lib/linkedin/oauth";
 import type { BusinessCategory, ConnectionOption, ReviewPatch, ReviewRequestStatus, SearchConsoleProperty, StarRating, Task } from "@/lib/gbp/types";
 import { auditLocation } from "@/lib/audit";
 import { isMapsUrl, resolveMapsLink, type MapsLinkInfo } from "@/lib/maps-link";
 import { distanceKm as distance, lookupCoords, scrapeMapsLink, type ScrapedPlace } from "@/lib/maps-scrape";
 import { refreshCompetitors } from "@/lib/competitor-refresh";
 import { addLead, closeOffer, currentWorkspaceId, getLead, listOffers, logAction, trackOffer as trackOfferEvent, updateLead } from "@/lib/platform/store";
+import { APP_NAME } from "@/components/brand";
 import { LINK_TOKEN, SAMPLE_VARS, emailHtml, mergeTemplate, splitOnLink, templateOrder } from "@/lib/templates";
 import { reviewLink } from "@/lib/reviews";
 import { CHANNELS, CONNECT_LABEL, LOCKED, MOVABLE, validatePost, type Channel, type PostDraft, type WhenMode } from "@/lib/posts";
@@ -111,7 +113,7 @@ export async function updateReviewRequest(id: string, status: ReviewRequestStatu
 }
 
 const str = (max: number) => z.string().max(max);
-const channel = z.enum(["google", "facebook", "instagram", "linkedin", "x"]);
+const channel = z.enum(["google", "facebook", "instagram", "linkedin"]);
 const draftSchema = z.object({
   title: str(200),
   body: str(70_000),
@@ -469,7 +471,7 @@ export async function disconnectSearchConsole(): Promise<ActionResult> {
 }
 
 // ---------------------------------------------------------------- connections (Settings)
-const channelSchema = z.enum(["google", "facebook", "instagram", "linkedin", "x"]);
+const channelSchema = z.enum(["google", "facebook", "instagram", "linkedin"]);
 
 /** Demo mode simulates the OAuth round trip; live mode needs an OAuth app per network (see Settings). */
 export async function connectChannel(channel: Channel): Promise<ActionResult & { needsSelection?: boolean; redirect?: string }> {
@@ -479,6 +481,7 @@ export async function connectChannel(channel: Channel): Promise<ActionResult & {
     if (ch === "google" && googleOAuthConfigured()) return { ok: true, id: ch, redirect: await googleAuthUrl("gbp", "/settings?tab=accounts") };
     // Real Meta app configured: Facebook's sign-in (Facebook Login for Business), back at /api/oauth/meta/callback → Settings.
     if ((ch === "facebook" || ch === "instagram") && metaConfigured()) return { ok: true, id: ch, redirect: await metaAuthUrl(ch, "/settings?tab=accounts") };
+    if (ch === "linkedin" && linkedinConfigured()) return { ok: true, id: ch, redirect: await linkedinAuthUrl("/settings?tab=accounts") };
     if (!channelAvailable(ch)) return { ok: false, error: `${CONNECT_LABEL[ch]} isn't set up for this app yet` };
     const c = await (await getProvider()).connectChannel(ch);
     revalidatePath("/", "layout");
@@ -554,15 +557,54 @@ async function locationAccess(allLocations: boolean | undefined, ids: string[] |
   return picked.length === all.length ? [] : picked; // every location picked = all
 }
 
+/** The app's address for links in emails: APP_URL, else the address this request came in on. */
+async function siteOrigin() {
+  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3001";
+  return `${h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https")}://${host}`;
+}
+
+type InviteSend = { email: string; token: string; emailed: boolean; error?: string };
+
+/** Emails each invite through the workspace's connected Gmail. Without Gmail (or when a send fails) the link is shared by hand. */
+async function emailInvites(provider: Awaited<ReturnType<typeof getProvider>>, inviter: { name: string; email: string }, invites: { email: string; token: string }[]): Promise<InviteSend[]> {
+  const sender = await provider.getEmailSender();
+  if (sender.status !== "connected") return invites.map((i) => ({ ...i, emailed: false }));
+  const locations = await provider.listLocations().catch(() => []);
+  const workspace = locations.length === 1 ? locations[0].title : locations.length ? `${locations[0].title} and ${locations.length - 1} more` : "their workspace";
+  const who = inviter.name || inviter.email;
+  const origin = await siteOrigin();
+  const out: InviteSend[] = [];
+  for (const i of invites) {
+    const link = `${origin}/invite/${i.token}`;
+    const text = (l: string) =>
+      `Hi,\n\n${who} invited you to join ${workspace} on ${APP_NAME}, where the team manages its Google Business Profiles: reviews, posts, performance and the profile audit.\n\n${l}\n\nSign in with this email address (${i.email}) to accept. The link works once.`;
+    try {
+      await provider.sendEmail({
+        to: i.email,
+        subject: `${who} invited you to ${APP_NAME}`,
+        body: text(`Join the workspace: ${link}`),
+        html: emailHtml(text(LINK_TOKEN), link, "Join workspace"),
+        fromName: `${who} via ${APP_NAME}`,
+      });
+      out.push({ ...i, emailed: true });
+    } catch (e) {
+      out.push({ ...i, emailed: false, error: e instanceof Error ? e.message : "Couldn't send the email" });
+    }
+  }
+  return out;
+}
+
 export async function inviteMember(input: {
   emails: string;
   name?: string;
   role: "admin" | "member";
   locationIds: string[];
   allLocations: boolean;
-}): Promise<ActionResult & { links?: { email: string; token: string }[] }> {
+}): Promise<ActionResult & { links?: InviteSend[] }> {
   try {
-    const { provider } = await asAdmin();
+    const { provider, me } = await asAdmin();
     const emails = [
       ...new Set(
         input.emails
@@ -583,8 +625,9 @@ export async function inviteMember(input: {
       const m = await provider.inviteMember({ email, name, role, locationIds });
       links.push({ email, token: m.inviteToken ?? "" });
     }
+    const sent = await emailInvites(provider, me, links);
     revalidatePath("/users");
-    return { ok: true, id: links[0].email, links };
+    return { ok: true, id: links[0].email, links: sent };
   } catch (e) {
     return fail(e);
   }
@@ -628,12 +671,13 @@ export async function removeMember(id: string): Promise<ActionResult> {
   }
 }
 
-export async function resendInvite(id: string): Promise<ActionResult & { token?: string }> {
+export async function resendInvite(id: string): Promise<ActionResult & { token?: string; emailed?: boolean; emailError?: string }> {
   try {
-    const { provider } = await asAdmin();
+    const { provider, me } = await asAdmin();
     const m = await provider.resendInvite(z.string().min(1).parse(id));
+    const [sent] = m.inviteToken ? await emailInvites(provider, me, [{ email: m.email, token: m.inviteToken }]) : [];
     revalidatePath("/users");
-    return { ok: true, id, token: m.inviteToken ?? undefined };
+    return { ok: true, id, token: m.inviteToken ?? undefined, emailed: !!sent?.emailed, emailError: sent?.error };
   } catch (e) {
     return fail(e);
   }

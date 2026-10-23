@@ -395,6 +395,8 @@ export interface Connection {
   account?: string | null;
   /** Picked locations / Page / author. */
   targets: { id: string; name: string }[];
+  /** The team member who connected it (their access is what the whole workspace uses). */
+  connectedBy?: string | null;
   connectedAt?: string | null;
   lastSyncAt?: string | null;
   /** Some tokens expire (LinkedIn: 60 days). */
@@ -413,6 +415,8 @@ export interface SearchConsoleConnection {
   /** Google account that granted access. */
   account?: string | null;
   connectedAt?: string | null;
+  /** The team member who connected it. */
+  connectedBy?: string | null;
   /** Which Search Console property belongs to each location. */
   sites: Record<string, string>;
 }

@@ -9,7 +9,6 @@ export const CHANNEL_ENV: Record<Channel, string[]> = {
   facebook: ["META_APP_ID", "META_APP_SECRET"],
   instagram: ["META_APP_ID", "META_APP_SECRET"],
   linkedin: ["LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET"],
-  x: ["X_CLIENT_ID", "X_CLIENT_SECRET"],
 };
 
 /** Demo mode simulates every network; live mode needs that network's OAuth app credentials. */

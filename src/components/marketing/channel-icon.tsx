@@ -37,7 +37,10 @@ export function LinkedInIcon({ className }: { className?: string }) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
       <rect width="24" height="24" rx="4" fill="#0A66C2" />
-      <path fill="#fff" d="M7.1 9.6h2.6V18H7.1zM8.4 5.4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3M11.4 9.6h2.5v1.15h.04c.35-.66 1.2-1.36 2.47-1.36 2.64 0 3.13 1.74 3.13 4V18h-2.6v-4.06c0-.97-.02-2.22-1.35-2.22-1.35 0-1.56 1.06-1.56 2.15V18h-2.6z" />
+      <path
+        fill="#fff"
+        d="M7.1 9.6h2.6V18H7.1zM8.4 5.4a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3M11.4 9.6h2.5v1.15h.04c.35-.66 1.2-1.36 2.47-1.36 2.64 0 3.13 1.74 3.13 4V18h-2.6v-4.06c0-.97-.02-2.22-1.35-2.22-1.35 0-1.56 1.06-1.56 2.15V18h-2.6z"
+      />
     </svg>
   );
 }
@@ -56,7 +59,6 @@ export function ChannelIcon({ channel, className }: { channel: Channel; classNam
   if (channel === "google") return <GoogleIcon className={cls} />;
   if (channel === "facebook") return <FacebookIcon className={cls} />;
   if (channel === "linkedin") return <LinkedInIcon className={cls} />;
-  if (channel === "x") return <XIcon className={cls} />;
   return <InstagramIcon className={cls} />;
 }
 

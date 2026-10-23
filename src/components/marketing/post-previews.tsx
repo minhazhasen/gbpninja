@@ -9,27 +9,7 @@
  */
 import { useState, type ReactNode } from "react";
 import { format, formatDistanceToNowStrict } from "date-fns";
-import {
-  Bookmark,
-  ChevronLeft,
-  ChevronRight,
-  ExternalLink,
-  Globe,
-  Heart,
-  ImagePlus,
-  Link2,
-  MessageCircle,
-  MoreHorizontal,
-  Phone,
-  Play,
-  Send,
-  Share2,
-  Tag,
-  ThumbsUp,
-  X,
-  Repeat2,
-  BarChart3,
-} from "lucide-react";
+import { Bookmark, ChevronLeft, ChevronRight, ExternalLink, Globe, Heart, ImagePlus, Link2, MessageCircle, MoreHorizontal, Phone, Play, Send, Share2, Tag, ThumbsUp, X } from "lucide-react";
 import { CTA_LABEL, channelMedia, channelText, formatEventRange, formatOfferRange, truncateForPreview, type PostDraft, type PostMedia } from "@/lib/posts";
 import { cn } from "@/lib/utils";
 
@@ -107,10 +87,7 @@ function Avatar({ account, size, className }: { account: PreviewAccount; size: n
       className={cn("shrink-0 rounded-full border border-black/5 bg-white object-contain", className)}
     />
   ) : (
-    <span
-      style={{ width: size, height: size, fontSize: size * 0.42 }}
-      className={cn("flex shrink-0 items-center justify-center rounded-full bg-[#E8EAED] font-semibold text-[#3C4043]", className)}
-    >
+    <span style={{ width: size, height: size, fontSize: size * 0.42 }} className={cn("flex shrink-0 items-center justify-center rounded-full bg-[#E8EAED] font-semibold text-[#3C4043]", className)}>
       {initial}
     </span>
   );
@@ -173,7 +150,15 @@ function postTime(when: Date | null, network: "google" | "facebook" | "instagram
   if (network === "instagram") return format(when, when.getFullYear() === new Date().getFullYear() ? "MMMM d" : "MMMM d, yyyy");
   if (network === "linkedin" && past) {
     const mins = Math.round((Date.now() - when.getTime()) / 60_000);
-    return mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.round(mins / 60)}h` : mins < 10_080 ? `${Math.round(mins / 1440)}d` : mins < 43_200 ? `${Math.round(mins / 10_080)}w` : `${Math.round(mins / 43_200)}mo`;
+    return mins < 60
+      ? `${mins}m`
+      : mins < 1440
+        ? `${Math.round(mins / 60)}h`
+        : mins < 10_080
+          ? `${Math.round(mins / 1440)}d`
+          : mins < 43_200
+            ? `${Math.round(mins / 10_080)}w`
+            : `${Math.round(mins / 43_200)}mo`;
   }
   return format(when, when.getFullYear() === new Date().getFullYear() ? "MMM d" : "MMM d, yyyy");
 }
@@ -508,20 +493,13 @@ export function LinkedInPreview({ draft, account, when }: { draft: PostDraft; ac
         </div>
         <MoreHorizontal className="h-5 w-5 text-[#666666]" aria-hidden />
       </header>
-      {shown && (
-        <Clamp text={shown} chars={210} lines={3} more="…see more" linkClass="font-semibold text-[#0A66C2]" moreClass="text-[#666666] hover:underline" className="px-4 pb-2" />
-      )}
+      {shown && <Clamp text={shown} chars={210} lines={3} more="…see more" linkClass="font-semibold text-[#0A66C2]" moreClass="text-[#666666] hover:underline" className="px-4 pb-2" />}
       {media.length > 0 && (
         <div className={cn("grid gap-0.5", media.length > 1 && "grid-cols-2")}>
           {media.slice(0, 4).map((m, i) => (
-            <div
-              key={m.url}
-              className={cn("relative bg-[#F3F2EF]", media.length === 1 ? "aspect-[1.91/1]" : "aspect-square", media.length === 3 && i === 0 && "col-span-2 aspect-[1.91/1]")}
-            >
+            <div key={m.url} className={cn("relative bg-[#F3F2EF]", media.length === 1 ? "aspect-[1.91/1]" : "aspect-square", media.length === 3 && i === 0 && "col-span-2 aspect-[1.91/1]")}>
               <img referrerPolicy="no-referrer" src={m.url} alt={m.alt || ""} className="h-full w-full object-cover" />
-              {i === 3 && media.length > 4 && (
-                <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-2xl font-semibold text-white">+{media.length - 4}</span>
-              )}
+              {i === 3 && media.length > 4 && <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-2xl font-semibold text-white">+{media.length - 4}</span>}
             </div>
           ))}
         </div>
@@ -548,66 +526,6 @@ export function LinkedInPreview({ draft, account, when }: { draft: PostDraft; ac
         <span className={action}>
           <Send className="h-[18px] w-[18px]" /> Send
         </span>
-      </div>
-    </article>
-  );
-}
-
-// ================================================================ X
-export function XPreview({ draft, account, when }: { draft: PostDraft; account: PreviewAccount; when: Date | null }) {
-  const text = channelText(draft, "x");
-  const media = channelMedia(draft.media, "x");
-  const video = draft.media.find((m) => m.type === "video");
-  const shown = video && !text.includes(video.url) ? `${text}${text ? "\n\n" : ""}${video.url}` : text;
-  const time = postTime(when, "x");
-  const over = [...text].length > 280;
-  const action = "flex items-center gap-1.5 text-[13px] text-[#536471]";
-  return (
-    <article className="mx-auto max-w-[520px] overflow-hidden rounded-2xl border border-[#EFF3F4] bg-white px-4 py-3 font-[system-ui,-apple-system,'Segoe_UI',Roboto,Helvetica,Arial,sans-serif] text-[15px] leading-5 text-[#0F1419]">
-      <div className="flex gap-3">
-        <Avatar account={account} size={40} />
-        <div className="min-w-0 flex-1">
-          <p className="flex min-w-0 items-center gap-1 text-[15px]">
-            <span className="truncate font-bold">{account.name}</span>
-            <span className="truncate text-[#536471]">@{account.handle} · {time}</span>
-            <MoreHorizontal className="ml-auto h-[18px] w-[18px] shrink-0 text-[#536471]" aria-hidden />
-          </p>
-          {shown && (
-            <p className="mt-0.5 whitespace-pre-wrap break-words">
-              <Rich text={shown} linkClass="text-[#1D9BF0]" />
-            </p>
-          )}
-          {media.length > 0 && (
-            <div className={cn("mt-3 grid gap-0.5 overflow-hidden rounded-2xl border border-[#CFD9DE]", media.length > 1 && "grid-cols-2")}>
-              {media.map((m, i) => (
-                <img referrerPolicy="no-referrer"
-                  key={i}
-                  src={m.url}
-                  alt={m.alt ?? ""}
-                  className={cn("w-full bg-[#F7F9F9] object-cover", media.length === 1 ? "aspect-[16/9]" : media.length === 3 && i === 0 ? "row-span-2 h-full" : "aspect-square")}
-                />
-              ))}
-            </div>
-          )}
-          {over && <p className="mt-2 text-[13px] font-semibold text-[#F4212E]">Over 280 characters — X will cut this post</p>}
-          <div className="mt-3 flex max-w-[425px] justify-between">
-            <span className={action}>
-              <MessageCircle className="h-[17px] w-[17px]" /> 3
-            </span>
-            <span className={action}>
-              <Repeat2 className="h-[17px] w-[17px]" /> 2
-            </span>
-            <span className={action}>
-              <Heart className="h-[17px] w-[17px]" /> 18
-            </span>
-            <span className={action}>
-              <BarChart3 className="h-[17px] w-[17px]" /> 412
-            </span>
-            <span className={action}>
-              <Bookmark className="h-[17px] w-[17px]" />
-            </span>
-          </div>
-        </div>
       </div>
     </article>
   );

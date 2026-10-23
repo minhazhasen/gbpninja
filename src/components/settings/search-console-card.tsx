@@ -117,11 +117,16 @@ export function SearchConsoleCard({
             <div className="min-w-0">
               <p className="flex items-center gap-2 font-semibold">
                 <span className="truncate">Google Search Console</span>
-                <span className="shrink-0 rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-accent-foreground">Free</span>
               </p>
               <p className="truncate text-xs text-muted-foreground">
                 {connected
-                  ? [connection.account, connection.connectedAt && `connected ${formatDistanceToNow(parseISO(connection.connectedAt), { addSuffix: true })}`].filter(Boolean).join(" · ")
+                  ? [
+                      connection.account,
+                      connection.connectedBy && `added by ${connection.connectedBy}`,
+                      connection.connectedAt && `connected ${formatDistanceToNow(parseISO(connection.connectedAt), { addSuffix: true })}`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
                   : "Free rankings: average position, clicks and impressions per search. Read-only."}
               </p>
             </div>

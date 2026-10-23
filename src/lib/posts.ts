@@ -3,12 +3,12 @@
 import { addDays, format } from "date-fns";
 
 // ---------------------------------------------------------------- channels
-export type Channel = "google" | "facebook" | "instagram" | "linkedin" | "x";
-export const CHANNELS: Channel[] = ["google", "facebook", "instagram", "linkedin", "x"];
-export const CHANNEL_LABEL: Record<Channel, string> = { google: "Google", facebook: "Facebook", instagram: "Instagram", linkedin: "LinkedIn", x: "X" };
+export type Channel = "google" | "facebook" | "instagram" | "linkedin";
+export const CHANNELS: Channel[] = ["google", "facebook", "instagram", "linkedin"];
+export const CHANNEL_LABEL: Record<Channel, string> = { google: "Google", facebook: "Facebook", instagram: "Instagram", linkedin: "LinkedIn" };
 /** Max characters per channel. */
-export const CHANNEL_LIMIT: Record<Channel, number> = { google: 1500, facebook: 63206, instagram: 2200, linkedin: 3000, x: 280 };
-export const CONNECT_LABEL: Record<Channel, string> = { google: "Google Business Profile", facebook: "Facebook Page", instagram: "Instagram Business", linkedin: "LinkedIn Page", x: "X (Twitter)" };
+export const CHANNEL_LIMIT: Record<Channel, number> = { google: 1500, facebook: 63206, instagram: 2200, linkedin: 3000 };
+export const CONNECT_LABEL: Record<Channel, string> = { google: "Google Business Profile", facebook: "Facebook Page", instagram: "Instagram Business", linkedin: "LinkedIn" };
 
 // ---------------------------------------------------------------- posts
 export type PostStatus = "draft" | "scheduled" | "publishing" | "published" | "failed" | "partially_failed";
@@ -118,9 +118,6 @@ export interface InstagramOptions {
 export interface LinkedInOptions {
   text: string;
 }
-export interface XOptions {
-  text: string;
-}
 
 /** What the composer edits. */
 export interface PostDraft {
@@ -135,7 +132,6 @@ export interface PostDraft {
   facebook: FacebookOptions;
   instagram: InstagramOptions;
   linkedin: LinkedInOptions;
-  x: XOptions;
   /** Without '#'; appended to Facebook / Instagram / LinkedIn / X text. */
   hashtags: string[];
   note: string;
@@ -171,7 +167,6 @@ export const emptyDraft = (): PostDraft => ({
   facebook: { text: "", link: "", first_comment: "" },
   instagram: { text: "", first_comment: "" },
   linkedin: { text: "" },
-  x: { text: "" },
   hashtags: [],
   note: "",
   label: "",
@@ -198,7 +193,6 @@ export function postToDraft(p: Post): PostDraft {
     facebook: { ...e.facebook, ...p.facebook },
     instagram: { ...e.instagram, ...p.instagram },
     linkedin: { ...e.linkedin, ...p.linkedin },
-    x: { ...e.x, ...p.x },
     hashtags: [...(p.hashtags ?? [])],
     note: p.note ?? "",
     label: p.label ?? "",
@@ -210,11 +204,15 @@ export function postToDraft(p: Post): PostDraft {
 export const postForLocation = (p: Pick<Post, "google">, locationId: string) => !p.google.locations.length || p.google.locations.includes(locationId);
 
 // ---------------------------------------------------------------- per-channel text
-export const normalizeHashtag = (raw: string) => raw.trim().replace(/^#+/, "").replace(/[^\p{L}\p{N}_]/gu, "");
+export const normalizeHashtag = (raw: string) =>
+  raw
+    .trim()
+    .replace(/^#+/, "")
+    .replace(/[^\p{L}\p{N}_]/gu, "");
 export const hashtagsIn = (text: string) => text.match(/#[\p{L}\p{N}_]+/gu) ?? [];
 
 /** Text actually posted on a channel: own text (when customised) or the main text, + hashtags (not on Google). */
-export function channelText(d: Pick<PostDraft, "body" | "custom_text" | "google" | "facebook" | "instagram" | "linkedin" | "hashtags"> & { x?: XOptions }, ch: Channel): string {
+export function channelText(d: Pick<PostDraft, "body" | "custom_text" | "google" | "facebook" | "instagram" | "linkedin" | "hashtags">, ch: Channel): string {
   const own = d.custom_text ? (d[ch]?.text ?? "").trim() : "";
   const base = own || (d.body ?? "").trim();
   if (ch === "google") return base;
@@ -252,7 +250,6 @@ export type PostField =
   | "facebook.text"
   | "instagram.text"
   | "linkedin.text"
-  | "x.text"
   | "media"
   | "hashtags"
   | "google.event.title"
@@ -300,7 +297,8 @@ export function validatePost(post: PostDraft, opts: { connected?: Channel[]; whe
 
   for (const ch of post.channels) {
     const len = [...(texts[ch] ?? "")].length;
-    if (len > CHANNEL_LIMIT[ch]) add({ channel: ch, field: textField(ch), level: "error", message: `${CHANNEL_LABEL[ch]} allows ${CHANNEL_LIMIT[ch].toLocaleString()} characters (${len.toLocaleString()} now)` });
+    if (len > CHANNEL_LIMIT[ch])
+      add({ channel: ch, field: textField(ch), level: "error", message: `${CHANNEL_LABEL[ch]} allows ${CHANNEL_LIMIT[ch].toLocaleString()} characters (${len.toLocaleString()} now)` });
   }
 
   // ---- Google
@@ -353,7 +351,8 @@ export function validatePost(post: PostDraft, opts: { connected?: Channel[]; whe
   // ---- Instagram
   if (post.channels.includes("instagram")) {
     if (!post.media.length) add({ channel: "instagram", field: "media", level: "error", message: "Instagram needs at least one image" });
-    else if (post.media.some((m) => m.type === "video" && !isDirectVideo(m.url))) add({ channel: "instagram", field: "media", level: "error", message: "Instagram needs a direct video file link (.mp4)" });
+    else if (post.media.some((m) => m.type === "video" && !isDirectVideo(m.url)))
+      add({ channel: "instagram", field: "media", level: "error", message: "Instagram needs a direct video file link (.mp4)" });
     const tags = hashtagsIn(texts.instagram ?? "").length;
     if (tags > 30) add({ channel: "instagram", field: post.hashtags.length ? "hashtags" : textField("instagram"), level: "error", message: `Instagram allows 30 hashtags (${tags} now)` });
     const commentTags = hashtagsIn(post.instagram.first_comment).length;
@@ -366,12 +365,6 @@ export function validatePost(post: PostDraft, opts: { connected?: Channel[]; whe
   // ---- LinkedIn
   if (post.channels.includes("linkedin") && post.media.some((m) => m.type === "video"))
     add({ channel: "linkedin", field: "media", level: "warning", message: "LinkedIn gets video links as a link in the text" });
-
-  // ---- X
-  if (post.channels.includes("x")) {
-    if (post.media.filter((m) => m.type === "image").length > 4) add({ channel: "x", field: "media", level: "warning", message: "X shows the first 4 images only" });
-    if (post.media.some((m) => m.type === "video")) add({ channel: "x", field: "media", level: "warning", message: "X gets video links as a link in the text" });
-  }
 
   if (when === "schedule") {
     if (!post.scheduled_at) add({ field: "scheduled_at", level: "error", message: "Pick a date and time" });
@@ -435,7 +428,6 @@ export function channelMedia(media: PostMedia[], ch: Channel): PostMedia[] {
   if (ch === "google") return media.filter((m) => m.type === "image").slice(0, 1);
   if (ch === "instagram") return media.filter((m) => m.type === "image" || isDirectVideo(m.url)).slice(0, 10);
   if (ch === "linkedin") return media.filter((m) => m.type === "image").slice(0, 10);
-  if (ch === "x") return media.filter((m) => m.type === "image").slice(0, 4);
   const first = media[0];
   if (first?.type === "video") return [first];
   return media.filter((m) => m.type === "image").slice(0, 10);
@@ -471,7 +463,11 @@ export function formatOfferRange(start: string, end?: string | null): string {
 export function truncateForPreview(text: string, maxChars: number, maxLines: number): string | null {
   const lines = text.split("\n");
   let cut = lines.length > maxLines ? lines.slice(0, maxLines).join("\n") : text;
-  if ([...cut].length > maxChars) cut = [...cut].slice(0, maxChars).join("").replace(/\s+\S*$/, "");
+  if ([...cut].length > maxChars)
+    cut = [...cut]
+      .slice(0, maxChars)
+      .join("")
+      .replace(/\s+\S*$/, "");
   return cut.length < text.length ? cut.trimEnd() : null;
 }
 
@@ -510,7 +506,6 @@ export function postEngagement(p: Pick<Post, "stats">) {
 }
 
 /** Networks whose API reports per-post stats. Google doesn't (its post views are only in its own dashboard). */
-export const STATS_CHANNELS: Channel[] = ["facebook", "instagram", "linkedin", "x"];
+export const STATS_CHANNELS: Channel[] = ["facebook", "instagram", "linkedin"];
 /** Published channels of a post that can show stats. */
-export const postStatChannels = (p: Pick<Post, "channels" | "results">) =>
-  CHANNELS.filter((c) => STATS_CHANNELS.includes(c) && p.channels.includes(c) && p.results?.[c]?.status === "published");
+export const postStatChannels = (p: Pick<Post, "channels" | "results">) => CHANNELS.filter((c) => STATS_CHANNELS.includes(c) && p.channels.includes(c) && p.results?.[c]?.status === "published");

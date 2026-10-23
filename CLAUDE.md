@@ -124,12 +124,19 @@ a content calendar for posts, and a profile audit with in-app fixes.
   (unpublished photos + attached_media) / video, Instagram image / carousel / Reel (container → wait FINISHED → media_publish), optional
   first comment, permalink + id in `results[ch]`. Instagram needs public media links: `src/lib/public-media.ts` saves data: URLs beside
   the DB (`media/`, random 48-hex names) served by `/api/media/[file]` at `APP_URL` — refuses on localhost. Webhooks / App Review: later.
+- LinkedIn (real when `LINKEDIN_CLIENT_ID/SECRET` are set): `src/lib/linkedin/oauth.ts` — OpenID Connect + Share on LinkedIn
+  (`openid profile email w_member_social`), callback `src/app/api/oauth/linkedin/callback` (`LINKEDIN_REDIRECT_URI`), token per workspace
+  `<ws>:linkedin` (60 days, no refresh → row shows the expiry; reconnect). Posts as the member (`urn:li:person:<sub>`); Company Pages need
+  LinkedIn's Community Management API (separate approval, not wired). `src/lib/linkedin/publish.ts`: Posts API (`/rest/posts`,
+  `LinkedIn-Version` = 3 months back or `LINKEDIN_API_VERSION`), images via `/rest/images?action=initializeUpload` (1 = media, 2+ =
+  multiImage), text in "little text" (`littleText`: escapes, #tags → hashtag tags), delete `/rest/posts/{urn}`. X was removed from the app.
 - `src/lib/connections.ts` + Settings (`src/components/settings/connections-board.tsx`) — connected accounts for Google,
   Facebook, Instagram, LinkedIn and X (connect → pick locations/Page/account → sync/disconnect). Demo mode simulates OAuth;
   live mode needs each network's app keys (see `.env.example`). `getConnectedChannels()` derives from connections.
 - Users (`src/app/(app)/users`, `src/components/users/users-board.tsx`) — workspace members with roles `admin` (everything,
-  incl. Settings and Users) or `member` (assigned locations only; `locationIds: []` = all). Invite by email → shareable
-  `/invite/[token]` link (no email service yet). Server actions guard: admins only, can't remove yourself or the last admin.
+  incl. Settings and Users) or `member` (assigned locations only; `locationIds: []` = all). Invite by email → `/invite/[token]` link,
+  emailed through the workspace's connected Gmail (`emailInvites` in actions.ts: "Join workspace" button, `APP_URL` or the request
+  origin; also on Resend); without Gmail or when a send fails the dialog shows the link to copy. Server actions guard: admins only, can't remove yourself or the last admin.
   Roles are NOT enforced on other pages yet — wire `getCurrentMember()` into the provider/pages when real sign-in lands.
 - Ranking (`src/app/(app)/ranking`, `src/components/ranking/`) — Google Search Console only, for every profile (no keyword tracking /
   DataForSEO): `search-console-board.tsx` shows avg position, clicks, impressions, CTR per query, `?range=` with a 2-day data lag via `scRange`

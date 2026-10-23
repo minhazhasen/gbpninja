@@ -13,7 +13,7 @@ import { Modal, Segmented, Switch, useConfirm } from "@/components/ui-client";
 import { DateField, DateTimeField } from "@/components/date-time-field";
 import { PostPerformance } from "@/components/marketing/post-performance";
 import { ChannelIcon } from "@/components/marketing/channel-icon";
-import { FacebookPreview, GooglePreview, InstagramPreview, LinkedInPreview, XPreview, type PreviewAccount } from "@/components/marketing/post-previews";
+import { FacebookPreview, GooglePreview, InstagramPreview, LinkedInPreview, type PreviewAccount } from "@/components/marketing/post-previews";
 import { deletePost, publishPost, savePost } from "@/app/(app)/actions";
 import {
   CHANNELS,
@@ -281,11 +281,11 @@ export function PostComposer({
   const del = async () => {
     setMenuOpen(false);
     if (!post) return;
-    // Where it's live: deleted there too on Facebook and Google; Instagram (and LinkedIn / X for now) only in their own apps.
+    // Where it's live: deleted there too on Facebook, Google and LinkedIn; Instagram only in its own app.
     const liveOn = post.channels.filter((c) => post.results?.[c]?.status === "published");
     if (post.imported && !liveOn.includes(post.imported.channel)) liveOn.push(post.imported.channel);
-    const removed = liveOn.filter((c) => c === "facebook" || c === "google");
-    const stays = liveOn.filter((c) => c !== "facebook" && c !== "google");
+    const removed = liveOn.filter((c) => c === "facebook" || c === "google" || c === "linkedin");
+    const stays = liveOn.filter((c) => c === "instagram");
     const list = (cs: Channel[]) => cs.map((c) => CHANNEL_LABEL[c]).join(" and ");
     const ok = await confirm({
       title: "Delete this post?",
@@ -557,7 +557,7 @@ export function PostComposer({
               );
             })}
 
-          {(has("facebook") || has("instagram") || has("linkedin") || has("x")) && (
+          {(has("facebook") || has("instagram") || has("linkedin")) && (
             <div className="space-y-1.5">
               <Label htmlFor="mk-tags">
                 Hashtags{" "}
@@ -1049,8 +1049,6 @@ export function PostComposer({
         <FacebookPreview draft={draft} account={account("facebook")} when={previewWhen} device={fbDevice} />
       ) : previewChannel === "linkedin" ? (
         <LinkedInPreview draft={draft} account={account("linkedin")} when={previewWhen} />
-      ) : previewChannel === "x" ? (
-        <XPreview draft={draft} account={account("x")} when={previewWhen} />
       ) : (
         <InstagramPreview draft={draft} account={account("instagram")} when={previewWhen} aspect={igAspect} />
       )}

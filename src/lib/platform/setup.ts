@@ -21,7 +21,6 @@ export function setupChecklist(): SetupItem[] {
     { group: "Sign-in & data", label: "Platform admins", ok: platformAdminEmails().length > 0, hint: "PLATFORM_ADMIN_EMAILS" },
     { group: "Social networks", label: "Meta app (Facebook + Instagram)", ok: has(...CHANNEL_ENV.facebook), hint: CHANNEL_ENV.facebook.join(" / ") },
     { group: "Social networks", label: "LinkedIn app", ok: has(...CHANNEL_ENV.linkedin), hint: CHANNEL_ENV.linkedin.join(" / ") },
-    { group: "Social networks", label: "X (Twitter) app", ok: has(...CHANNEL_ENV.x), hint: CHANNEL_ENV.x.join(" / ") },
     { group: "Jobs", label: "Cron secret (daily competitor check)", ok: has("CRON_SECRET"), hint: "CRON_SECRET → /api/cron/refresh-competitors" },
   ];
 }

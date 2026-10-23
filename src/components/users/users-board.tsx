@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { toast } from "sonner";
-import { Check, Copy, Crown, Link2, Loader2, MapPin, MoreHorizontal, Pencil, Search, Send, ShieldCheck, Trash2, UserPlus, UserRound, X } from "lucide-react";
+import { Check, Copy, Crown, Link2, Loader2, MailCheck, MapPin, MoreHorizontal, Pencil, Search, Send, ShieldCheck, Trash2, UserPlus, UserRound, X } from "lucide-react";
 import { Card, PageHeader, PanelHeader, StatStrip, buttonClass, inputClass } from "@/components/ui";
 import { Menu, Modal, useConfirm } from "@/components/ui-client";
 import { ReviewAvatar } from "@/components/reviews/review-bits";
@@ -98,8 +99,11 @@ export function UsersBoard({ members, meId, isAdmin, locations }: { members: Mem
   const resend = async (m: Member) => {
     const res = await resendInvite(m.id);
     if (!res.ok) return void toast.error(res.error);
-    copyLink(res.token);
-    toast.success(`New invite link for ${m.email}`, { description: "Copied — the old link no longer works." });
+    if (res.emailed) toast.success(`Invite emailed to ${m.email}`, { description: "The old link no longer works." });
+    else {
+      copyLink(res.token);
+      toast.success(`New invite link for ${m.email}`, { description: `${res.emailError ? `Email not sent: ${res.emailError}. ` : ""}Copied — the old link no longer works.` });
+    }
     router.refresh();
   };
 
@@ -498,7 +502,7 @@ function InviteDialog({ open, onClose, locations, onDone }: { open: boolean; onC
   const [all, setAll] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [links, setLinks] = useState<{ email: string; token: string }[] | null>(null);
+  const [links, setLinks] = useState<{ email: string; token: string; emailed: boolean; error?: string }[] | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -516,7 +520,9 @@ function InviteDialog({ open, onClose, locations, onDone }: { open: boolean; onC
     const res = await inviteMember({ emails, name, role, allLocations: all, locationIds: [...picked] });
     setBusy(false);
     if (!res.ok) return void toast.error(res.error);
-    toast.success(res.links && res.links.length > 1 ? `${res.links.length} invites created` : "Invite created");
+    const n = res.links?.length ?? 0;
+    const mailed = res.links?.filter((l) => l.emailed).length ?? 0;
+    toast.success(mailed ? (mailed > 1 ? `${mailed} invites emailed` : "Invite emailed") : n > 1 ? `${n} invites created` : "Invite created");
     setLinks(res.links ?? []);
     onDone();
   };
@@ -527,19 +533,41 @@ function InviteDialog({ open, onClose, locations, onDone }: { open: boolean; onC
       onClose={() => !busy && onClose()}
       labelledBy="invite-title"
       className="h-[100dvh] max-w-lg sm:h-auto sm:max-h-[92dvh]"
-      title={<span id="invite-title">{links ? "Invites ready" : "Invite users"}</span>}
+      title={<span id="invite-title">{links ? (links.every((l) => l.emailed) ? "Invites sent" : "Invites ready") : "Invite users"}</span>}
     >
       {links ? (
         <>
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-5">
             <p className="text-sm text-muted-foreground">
-              Email sending isn&apos;t set up yet, so share each link with the person. Links work once and can be cancelled from the user list.
+              {links.every((l) => l.emailed) ? (
+                "Each person got an email from your connected Gmail with a Join workspace button. You can also copy a link to send it another way."
+              ) : links.some((l) => l.emailed || l.error) ? (
+                "Some emails couldn't be sent — copy those links and share them with the person."
+              ) : (
+                <>
+                  Share each link with the person.{" "}
+                  <Link href="/settings?tab=email" className="font-medium text-primary hover:underline">
+                    Connect Gmail
+                  </Link>{" "}
+                  to email invites automatically.
+                </>
+              )}{" "}
+              Links work once and can be cancelled from the user list.
             </p>
             <ul className="divide-y rounded-xl border">
               {links.map((l) => (
                 <li key={l.email} className="flex items-center gap-3 px-3 py-2.5">
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-sm font-semibold">{l.email}</span>
+                    {l.emailed ? (
+                      <span className="flex items-center gap-1 text-[11px] font-medium text-success">
+                        <MailCheck className="h-3 w-3" /> Email sent
+                      </span>
+                    ) : l.error ? (
+                      <span className="block truncate text-[11px] text-destructive" title={l.error}>
+                        Email not sent: {l.error}
+                      </span>
+                    ) : null}
                     <span className="block truncate font-mono text-[11px] text-muted-foreground">{inviteUrl(l.token)}</span>
                   </span>
                   <button

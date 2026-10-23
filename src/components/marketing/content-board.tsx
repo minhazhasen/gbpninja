@@ -38,17 +38,7 @@ type View = "week" | "month" | "list";
 const collision: CollisionDetection = (args) => (args.pointerCoordinates ? pointerWithin(args) : rectIntersection(args));
 const VIEW_KEY = "gbp-content-view";
 
-export function ContentBoard({
-  posts: serverPosts,
-  connected,
-  locations,
-  currentLocationId,
-}: {
-  posts: Post[];
-  connected: Channel[];
-  locations: ComposerLocation[];
-  currentLocationId: string;
-}) {
+export function ContentBoard({ posts: serverPosts, connected, locations, currentLocationId }: { posts: Post[]; connected: Channel[]; locations: ComposerLocation[]; currentLocationId: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -499,7 +489,9 @@ function MonthView({
                 className={cn("flex h-14 w-full flex-col items-center justify-center gap-1 md:hidden", isSameDay(d, selected) && "bg-accent")}
                 aria-label={`${format(d, "EEEE d MMMM")}, ${items.length} posts`}
               >
-                <span className={cn("text-xs tabular-nums", !inMonth && "text-muted-foreground/60", isToday(d) && "rounded-full bg-primary px-1.5 font-semibold text-primary-foreground")}>{format(d, "d")}</span>
+                <span className={cn("text-xs tabular-nums", !inMonth && "text-muted-foreground/60", isToday(d) && "rounded-full bg-primary px-1.5 font-semibold text-primary-foreground")}>
+                  {format(d, "d")}
+                </span>
                 <span className="flex h-1.5 gap-0.5">
                   {items.slice(0, 3).map((p) => (
                     <span key={p.id} className={cn("h-1.5 w-1.5 rounded-full", POST_STATUS[p.status].dot)} />

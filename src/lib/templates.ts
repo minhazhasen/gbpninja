@@ -45,9 +45,9 @@ const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", 
 
 /** HTML for a request email: text with line breaks, {{link}} as a "Leave a Google review" button.
  *  Email clients ignore CSS variables and classes, so colours are inline (brand primary #3D5BE0). */
-export function emailHtml(text: string, link: string | null) {
+export function emailHtml(text: string, link: string | null, buttonLabel = REVIEW_BUTTON_LABEL) {
   const button = link
-    ? `<a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 20px;border-radius:999px;background:#3D5BE0;color:#ffffff;font-weight:600;text-decoration:none">${REVIEW_BUTTON_LABEL}</a>`
+    ? `<a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 20px;border-radius:999px;background:#3D5BE0;color:#ffffff;font-weight:600;text-decoration:none">${escapeHtml(buttonLabel)}</a>`
     : "";
   const body = splitOnLink(text)
     .map((part) => escapeHtml(part).replace(/\r?\n/g, "<br>"))
