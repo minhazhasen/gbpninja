@@ -45,3 +45,8 @@ next-env.d.ts
 # local database
 prisma/*.db
 prisma/*.db-journal
+
+# SQLite write-ahead files (node:sqlite runs in WAL mode)
+*.db-shm
+*.db-wal
+*.db-journal
