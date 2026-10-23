@@ -563,7 +563,7 @@ export function PostComposer({
                 Hashtags{" "}
                 <span className="font-normal text-muted-foreground">
                   ·{" "}
-                  {(["facebook", "instagram", "linkedin", "x"] as Channel[])
+                  {(["facebook", "instagram", "linkedin"] as Channel[])
                     .filter(has)
                     .map((c) => CHANNEL_LABEL[c])
                     .join(", ")}

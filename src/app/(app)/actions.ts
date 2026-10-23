@@ -145,7 +145,6 @@ const draftSchema = z.object({
   facebook: z.object({ text: str(70_000), link: str(2000), first_comment: str(8000) }),
   instagram: z.object({ text: str(2200), first_comment: str(2200) }),
   linkedin: z.object({ text: str(3000) }),
-  x: z.object({ text: str(280) }),
   hashtags: z.array(str(100)).max(60),
   note: str(2000),
   label: str(60),
