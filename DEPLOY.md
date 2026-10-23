@@ -67,7 +67,9 @@ Save → *Restart*. The app creates its database tables on start (`src/instrumen
 ## Notes
 
 - **Restart / stale code:** each deploy writes a new `tmp/restart.txt`. If a deploy doesn't take effect, press *Restart* in Setup Node.js App.
-- **Prisma engine:** `prisma/schema.prisma` builds the `rhel-openssl-1.1.x` engine for this server (CloudLinux, OpenSSL 1.1.1).
+- **Process limit:** CloudLinux counts every thread toward the account's *Number Of Processes* (225), shared with PHP for all sites.
+  The app uses Node's built-in `node:sqlite` (no Prisma engine, which started a thread per CPU core and filled the limit → PHP 503s on
+  every site) and the loader sets `UV_THREADPOOL_SIZE=2`; it runs on ~12 threads. Watch cPanel → Resource Usage after changes.
 - **Schema changes:** edit `prisma/schema.prisma`, run `npm run db:sql` (and `npm run db:push` locally). New tables/indexes are created on the
   next start; changing existing columns needs a manual migration.
 - **Smoke test:** `https://app.gbpninja.com/privacy` (public) loads, `/dashboard` redirects to `/login`, sign-in works, Settings → connect Gmail.

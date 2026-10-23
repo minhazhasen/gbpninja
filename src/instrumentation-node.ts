@@ -16,7 +16,7 @@ export async function prepareDatabase() {
       .split(/;\s*$/m)
       .map((s) => s.replace(/^--.*$/gm, "").trim())
       .filter(Boolean);
-    for (const s of statements) await db.$executeRawUnsafe(s);
+    for (const s of statements) db.exec(s);
   } catch (e) {
     console.error("[db] Could not prepare the database:", e);
   }

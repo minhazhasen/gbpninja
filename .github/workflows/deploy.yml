@@ -46,7 +46,7 @@ jobs:
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
           NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
 
-      # bundle/ = server.js + trimmed node_modules (incl. the rhel-openssl-1.1.x Prisma engine) + static assets + public files,
+      # bundle/ = server.js + trimmed node_modules + prisma/schema.sql + static assets + public files,
       # packed into release/app.tar.gz next to the loader (deploy/server.js) and the release id.
       # tmp/restart.txt changes every deploy, which tells LiteSpeed / Passenger to restart the Node.js app.
       - name: Assemble release
@@ -57,7 +57,7 @@ jobs:
           cp -a public bundle/public
           rm -f bundle/.env bundle/.env.*
           test -f bundle/server.js
-          ls bundle/node_modules/.prisma/client | grep -q rhel-openssl-1.1.x
+          test -f bundle/prisma/schema.sql
           tar -czf release/app.tar.gz -C bundle .
           cp deploy/server.js release/server.js
           echo "${{ github.sha }}" > release/release.txt

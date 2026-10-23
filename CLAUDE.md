@@ -8,7 +8,9 @@ a content calendar for posts, and a profile audit with in-app fixes.
 - Tailwind CSS v4 — HSL theme tokens in `src/app/globals.css` (see Design below)
 - Sign-in: Firebase Authentication, Login with Google (see Auth below). Auth.js v5 (`next-auth@beta`, `src/auth.ts`) is kept only for the
   Google OAuth connection with the `business.manage` scope (live GBP data), not for app sign-in.
-- Prisma 6 + SQLite in dev (`prisma/schema.prisma`)
+- SQLite via Node's built-in `node:sqlite` at runtime (`src/lib/db.ts`, Node 22.13+); Prisma 6 only for the schema and tools
+  (`prisma/schema.prisma`, db push, `npm run db:sql`). Don't reintroduce the Prisma client at runtime: its engine starts a thread per
+  CPU core and fills the cPanel account's process limit (see `DEPLOY.md`)
 - Recharts for charts, lucide-react for icons, zod for input validation
 
 ## Commands

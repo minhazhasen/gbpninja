@@ -33,8 +33,7 @@ if (wanted && wanted !== current && fs.existsSync(archive)) {
   console.log(`[deploy] Unpacked release ${wanted}`);
 }
 
-// Prisma guesses the platform from /etc/os-release, which CageFS hides, and then looks for a Debian engine that isn't there.
-// Point it straight at the engine built for this server (CloudLinux, OpenSSL 1.1 — see prisma/schema.prisma binaryTargets).
-process.env.PRISMA_QUERY_ENGINE_LIBRARY ||= path.join(app, "node_modules", ".prisma", "client", "libquery_engine-rhel-openssl-1.1.x.so.node");
+// CloudLinux counts every thread toward the account's process limit (shared with PHP for all sites). Keep libuv's pool small.
+process.env.UV_THREADPOOL_SIZE ||= "2";
 
 require(path.join(app, "server.js"));
