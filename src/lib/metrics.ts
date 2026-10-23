@@ -1,3 +1,5 @@
+import { differenceInCalendarDays, format, parseISO, startOfDay } from "date-fns";
+import { daysBetween, previousRange, type DateRangeValue } from "./date-ranges";
 import type { MetricPoint } from "./gbp/types";
 
 export interface ComparePoint {
@@ -17,9 +19,6 @@ export const SERIES = {
 } as const;
 export type SeriesKey = keyof typeof SERIES;
 
-export const RANGES = { "7": "Last 7 days", "28": "Last 28 days", "90": "Last 90 days" } as const;
-export type RangeKey = keyof typeof RANGES;
-
 export function value(m: MetricPoint, key: SeriesKey) {
   return key === "interactions" ? m.calls + m.websiteClicks + m.directions : m[key];
 }
@@ -37,16 +36,67 @@ export function totals(points: MetricPoint[]) {
   };
 }
 
-/** Splits a 2N-day series into previous/current halves and aligns them day by day. */
-export function splitCompare(points: MetricPoint[], days: number, key: SeriesKey) {
-  const previous = points.slice(-days * 2, -days);
-  const current = points.slice(-days);
-  const chart: ComparePoint[] = current.map((m, i) => ({
-    date: m.date,
-    label: new Date(`${m.date}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-    current: value(m, key),
-    previous: previous[i] ? value(previous[i], key) : undefined,
-    previousDate: previous[i]?.date,
-  }));
-  return { current, previous, chart };
+/** How far back "All time" goes: Google keeps about 18 months of performance data. */
+export const MAX_DAYS = 540;
+
+/** Days of history to fetch for a range (including the previous period when comparing). */
+export function daysNeeded(range: DateRangeValue, now = new Date()) {
+  const prev = range.compare ? previousRange(range) : null;
+  const earliest = prev?.from ?? range.from;
+  return Math.min(MAX_DAYS * 2, earliest ? differenceInCalendarDays(startOfDay(now), earliest) + 1 : MAX_DAYS);
 }
+
+/** Add several locations' daily points together, day by day. */
+export function sumByDate(perLocation: MetricPoint[][]): Map<string, MetricPoint> {
+  const byDate = new Map<string, MetricPoint>();
+  for (const points of perLocation)
+    for (const p of points) {
+      const c = byDate.get(p.date);
+      byDate.set(
+        p.date,
+        c
+          ? {
+              date: p.date,
+              impressions: c.impressions + p.impressions,
+              searchImpressions: c.searchImpressions + p.searchImpressions,
+              mapsImpressions: c.mapsImpressions + p.mapsImpressions,
+              calls: c.calls + p.calls,
+              websiteClicks: c.websiteClicks + p.websiteClicks,
+              directions: c.directions + p.directions,
+            }
+          : { ...p },
+      );
+    }
+  return byDate;
+}
+
+/** Totals for the range (and the previous period when comparing) plus a day-aligned chart. */
+export function rangeView(perLocation: MetricPoint[][], range: DateRangeValue, series: SeriesKey, now = new Date()) {
+  const byDate = sumByDate(perLocation);
+  const today = startOfDay(now);
+  const prev = range.compare ? previousRange(range) : null;
+  const firstDay = [...byDate.keys()].sort()[0];
+  const curDays = daysBetween(range.from ?? (firstDay ? parseISO(firstDay) : today), range.to);
+  const prevDays = prev ? daysBetween(prev.from, prev.to) : [];
+  const pick = (list: string[]) => list.map((d) => byDate.get(d)).filter((p): p is MetricPoint => !!p);
+  const chart: ComparePoint[] = curDays.map((d, i) => {
+    const c = byDate.get(d);
+    const p = prevDays[i] ? byDate.get(prevDays[i]) : undefined;
+    return {
+      date: d,
+      label: format(parseISO(d), curDays.length > 120 ? "MMM yy" : "MMM d"),
+      current: c ? value(c, series) : 0,
+      previous: p ? value(p, series) : undefined,
+      previousDate: p?.date,
+    };
+  });
+  return {
+    cur: totals(pick(curDays)),
+    before: prev ? totals(pick(prevDays)) : null,
+    chart,
+    start: curDays[0] ? parseISO(curDays[0]) : today,
+  };
+}
+
+/** "Sep 20 – Oct 19, 2026" (start year shown when it differs). */
+export const periodLabel = (start: Date, end: Date) => `${format(start, start.getFullYear() === end.getFullYear() ? "MMM d" : "MMM d, yyyy")} – ${format(end, "MMM d, yyyy")}`;

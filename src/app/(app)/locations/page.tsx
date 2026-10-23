@@ -1,3 +1,4 @@
+import { needsReply } from "@/lib/reviews";
 import Link from "next/link";
 import { Badge, Card, PageHeader, StatStrip } from "@/components/ui";
 import { auditLocation } from "@/lib/audit";
@@ -6,12 +7,13 @@ import { cn, withLocation } from "@/lib/utils";
 
 export default async function LocationsPage() {
   const provider = await getProvider();
+  const posts = await provider.listPosts();
   const locations = await provider.listLocations();
   const rows = await Promise.all(
     locations.map(async (l) => {
       const reviews = await provider.listReviews(l.id);
       const avg = reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0;
-      return { l, avg, reviews: reviews.length, unreplied: reviews.filter((r) => !r.reply).length, score: auditLocation(l, reviews).score };
+      return { l, avg, reviews: reviews.length, unreplied: reviews.filter(needsReply).length, score: auditLocation(l, reviews, posts).score };
     }),
   );
   const totalReviews = rows.reduce((s, r) => s + r.reviews, 0);
@@ -29,7 +31,37 @@ export default async function LocationsPage() {
         ]}
       />
       <Card className="min-w-0 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Phones and tablets */}
+        <ul className="divide-y lg:hidden">
+          {rows.map(({ l, avg, reviews, unreplied, score }) => (
+            <li key={l.id} className="px-4 py-3.5 sm:px-5">
+              <div className="flex items-start justify-between gap-3">
+                <Link href={withLocation("/dashboard", l.id)} className="min-w-0">
+                  <p className="truncate font-semibold">{l.title}</p>
+                  <p className="truncate text-xs text-muted-foreground">{l.primaryCategory} · {l.address}</p>
+                </Link>
+                {l.verified ? <Badge variant="success" pill>Verified</Badge> : <Badge variant="warning" pill>Unverified</Badge>}
+              </div>
+              <div className="mt-2.5 grid grid-cols-3 gap-2 text-xs">
+                <div className="rounded-lg bg-muted/50 px-2.5 py-2">
+                  <p className="text-muted-foreground">Rating</p>
+                  <p className="mt-0.5 font-semibold tabular-nums">
+                    {avg.toFixed(1)} <span className="font-normal text-muted-foreground">({reviews})</span>
+                  </p>
+                </div>
+                <Link href={withLocation("/reviews", l.id, { filter: "unreplied" })} className="rounded-lg bg-muted/50 px-2.5 py-2">
+                  <p className="text-muted-foreground">Needs reply</p>
+                  <p className={cn("mt-0.5 font-semibold tabular-nums", unreplied > 0 && "text-warning")}>{unreplied}</p>
+                </Link>
+                <Link href={withLocation("/audit", l.id)} className="rounded-lg bg-muted/50 px-2.5 py-2">
+                  <p className="text-muted-foreground">Score</p>
+                  <p className="mt-0.5 font-semibold tabular-nums">{score}</p>
+                </Link>
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="hidden overflow-x-auto lg:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left">

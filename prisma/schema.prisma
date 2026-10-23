@@ -49,3 +49,17 @@ model AuditSnapshot {
 
   @@index([locationId, createdAt])
 }
+
+// Google accounts connected through OAuth (src/lib/google/oauth.ts), one per purpose: "gbp" (business.manage) or "gmail" (gmail.send).
+// Tokens are AES-256-GCM encrypted with a key derived from SESSION_SECRET.
+model GoogleToken {
+  purpose      String   @id
+  email        String
+  name         String?
+  scope        String
+  accessToken  String
+  refreshToken String?
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

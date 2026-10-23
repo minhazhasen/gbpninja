@@ -14,6 +14,11 @@
   --viz-2: #2f9e70;
   --viz-3: #eb6834;
   --viz-4: #8a4fd8;
+  /* Extra series for multi-line comparisons (e.g. competitors' review growth). */
+  --viz-5: #d4a017;
+  --viz-6: #0f9fb8;
+  --viz-7: #d6457a;
+  --viz-8: #6b7a8f;
 
   --background: 220 20% 97%;
   --foreground: 221 39% 11%;
@@ -43,6 +48,10 @@
   --viz-2: #4fbf8f;
   --viz-3: #e0703f;
   --viz-4: #b18cf0;
+  --viz-5: #e8bd45;
+  --viz-6: #3cc3d9;
+  --viz-7: #ec7aa3;
+  --viz-8: #9aa8bb;
 
   --background: 225 22% 6%;
   --foreground: 220 14% 93%;
@@ -135,8 +144,21 @@
   color: var(--color-muted-foreground);
 }
 
+/* `backwards`, not `both`: a transform left on <main> after the animation would make it the
+   containing block for every position:fixed child (dialogs, the drag overlay) and misplace them. */
 @utility animate-page-in {
-  animation: page-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: page-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@utility animate-sheet-in {
+  animation: sheet-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0.6;
+  }
 }
 
 @utility no-scrollbar {

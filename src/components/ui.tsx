@@ -9,7 +9,7 @@ export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElemen
   return <div className={cn("rounded-xl border bg-card", className)} {...props} />;
 }
 
-export function PageHeader({ title, actions, children }: { title: string; actions?: React.ReactNode; children?: React.ReactNode }) {
+export function PageHeader({ title, actions, children }: { title: React.ReactNode; actions?: React.ReactNode; children?: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0">
@@ -23,12 +23,13 @@ export function PageHeader({ title, actions, children }: { title: string; action
 
 export function PanelHeader({ title, meta, action }: { title: string; meta?: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <div className="flex min-h-14 items-center justify-between gap-3 border-b px-5 py-3 lg:px-6">
-      <h2 className="flex min-w-0 items-baseline gap-2 text-base font-semibold tracking-tight">
+    // Wraps when narrow: the actions drop below the title instead of squeezing it (and its badges) underneath them.
+    <div className="flex min-h-14 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-5 py-3 lg:px-6">
+      <h2 className="flex min-w-0 max-w-full flex-wrap items-baseline gap-x-2 gap-y-1 text-base font-semibold tracking-tight">
         <span className="truncate">{title}</span>
-        {meta != null && <span className="shrink-0 text-sm font-normal tabular-nums text-muted-foreground">{meta}</span>}
+        {meta != null && <span className="max-w-full text-sm font-normal tabular-nums text-muted-foreground">{meta}</span>}
       </h2>
-      {action}
+      {action != null && <div className="ml-auto flex min-w-0 max-w-full items-center">{action}</div>}
     </div>
   );
 }
@@ -51,12 +52,14 @@ export interface StatItem {
   hint?: string;
   alert?: boolean;
   href?: string;
+  /** Client components only (e.g. switch a view). */
+  onClick?: () => void;
   active?: boolean;
 }
 
-export function StatStrip({ items, cols = 4 }: { items: StatItem[]; cols?: 4 | 5 }) {
+export function StatStrip({ items, cols = 4 }: { items: StatItem[]; cols?: 2 | 3 | 4 | 5 }) {
   return (
-    <Card className={cn("grid grid-cols-2 overflow-hidden", cols === 5 ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
+    <Card className={cn("grid grid-cols-2 overflow-hidden", cols === 5 ? "lg:grid-cols-5" : cols === 3 ? "lg:grid-cols-3" : cols === 2 ? "lg:grid-cols-2" : "lg:grid-cols-4")}>
       {items.map((s, i) => {
         const cls = cn(
           "flex min-w-0 flex-col gap-1 px-4 py-4 text-left sm:px-5 lg:px-6 lg:py-5",
@@ -64,7 +67,7 @@ export function StatStrip({ items, cols = 4 }: { items: StatItem[]; cols?: 4 | 5
           i >= 2 && "border-t lg:border-t-0",
           i >= 1 && "lg:border-l",
           i === items.length - 1 && i % 2 === 0 && "col-span-2 lg:col-span-1",
-          s.href && "transition-colors hover:bg-muted/40",
+          (s.href || s.onClick) && "transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none",
           s.active && "bg-muted/50",
         );
         const body = (
@@ -86,6 +89,12 @@ export function StatStrip({ items, cols = 4 }: { items: StatItem[]; cols?: 4 | 5
             )}
           </>
         );
+        if (s.onClick)
+          return (
+            <button key={s.label} type="button" onClick={s.onClick} aria-pressed={s.active} className={cls}>
+              {body}
+            </button>
+          );
         return s.href ? (
           <Link key={s.label} href={s.href} className={cls} aria-current={s.active ? "true" : undefined}>
             {body}
@@ -160,7 +169,7 @@ export function Field({ label, children, hint }: { label: string; children: Reac
 /** Pill tabs, like TasksBook's HubTabs. */
 export function PillTabs({ items, label }: { items: { href: string; label: string; active: boolean; count?: number }[]; label: string }) {
   return (
-    <nav aria-label={label} className="no-scrollbar -my-1 flex gap-1 overflow-x-auto py-1">
+    <nav aria-label={label} className="no-scrollbar -mt-1 flex gap-1 overflow-x-auto py-1">
       {items.map((t) => (
         <Link
           key={t.href}
