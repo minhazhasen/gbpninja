@@ -29,6 +29,12 @@ export interface Photo {
   width?: number;
   height?: number;
   createdAt: string;
+  /** Google media resource ("accounts/…/locations/…/media/…") when the photo is on Google. */
+  googleName?: string | null;
+  /** Added by a customer on Google: shown and counted, but only Google can remove it. */
+  fromCustomer?: boolean;
+  /** Views reported by Google (media `insights.viewCount`). Absent when Google doesn't report it: never estimated. */
+  views?: number | null;
 }
 export type NewPhoto = Pick<Photo, "url" | "category" | "width" | "height">;
 
@@ -75,8 +81,8 @@ export interface Location {
   regularHours?: HoursPeriod[];
   /** Holiday / one-off hours. `closed` wins over open/close. */
   specialHours?: SpecialHours[];
-  /** "More hours" by type, e.g. { type: "Delivery", periods: [...] }. */
-  moreHours?: { type: string; periods: HoursPeriod[] }[];
+  /** "More hours" by type, e.g. { type: "Delivery", periods: [...] }. `typeId` = Google's hoursTypeId when read from Google. */
+  moreHours?: { type: string; typeId?: string; periods: HoursPeriod[] }[];
   // ---- Media, services, attributes
   /** Logo, cover and gallery photos (Google `media`). The counts below are derived from it. */
   photos?: Photo[];
@@ -88,8 +94,14 @@ export interface Location {
   services: ServiceItem[];
   /** Products (Business Profile product editor; no public API — kept by us and synced manually). */
   products?: Product[];
-  /** Attribute ids that are on (see ATTRIBUTE_GROUPS). */
+  /** Attribute ids that are set (demo: see ATTRIBUTE_GROUPS; live: derived from `attributeValues`). */
   attributes: string[];
+  /** Live: the attributes Google offers for this profile (depends on its category), with Google's labels and groups. */
+  attributeCatalog?: AttributeDef[];
+  /** Live: every attribute value on Google, by attribute id (bool: yes/no, enum: one value, repeated enum: values, url: link). */
+  attributeValues?: Record<string, AttributeValue>;
+  /** Live: parts of the profile Google's API doesn't provide. The app doesn't judge or guess them. */
+  notInApi?: "products"[];
   verified: boolean;
   /** Google Maps place id — used for the "write a review" link. */
   placeId?: string;
@@ -113,6 +125,10 @@ export interface ServiceItem {
   /** In the account currency (USD in demo). */
   price?: number;
   description?: string;
+  /** Live: Google's predefined service id (structured services keep it when saved back). */
+  serviceTypeId?: string;
+  /** Live: currency of the price on Google, e.g. "USD". */
+  currencyCode?: string;
 }
 
 export type ProductPriceType = "none" | "fixed" | "range";
@@ -290,6 +306,8 @@ export interface GbpProvider {
   getSearchKeywords(locationId: string): Promise<KeywordMonth[]>;
   /** Channels this workspace can publish to right now (connected and not expired). */
   getConnectedChannels(): Promise<Channel[]>;
+  /** Live mode: Google data that couldn't be loaded, per location (pages show these instead of failing). */
+  getSyncIssues?(locationIds: string[]): Promise<SyncIssue[]>;
   /** One row per channel for Settings → Accounts. */
   listConnections(): Promise<Connection[]>;
   /** Start connecting (after the OAuth sign-in; `account` = the signed-in email). Usually ends in `needs_selection`. */
@@ -303,7 +321,7 @@ export interface GbpProvider {
   syncConnections(channel?: Channel): Promise<void>;
   getSearchConsole(): Promise<SearchConsoleConnection>;
   /** After Google sign-in with the Search Console (webmasters.readonly) scope. */
-  connectSearchConsole(): Promise<SearchConsoleConnection>;
+  connectSearchConsole(email?: string | null): Promise<SearchConsoleConnection>;
   listSearchConsoleProperties(): Promise<SearchConsoleProperty[]>;
   /** Map locations to properties (null = none). */
   setSearchConsoleSites(sites: Record<string, string | null>): Promise<SearchConsoleConnection>;
@@ -436,6 +454,14 @@ export interface SearchConsoleQueryDetail {
   devices: ({ device: SearchConsoleDevice } & SearchConsoleMetrics)[];
 }
 
+/** A part of a profile's Google data that couldn't be loaded (e.g. insights for an unverified profile). */
+export interface SyncIssue {
+  locationId: string;
+  title: string;
+  area: "insights" | "keywords" | "reviews" | "photos" | "posts" | "attributes";
+  message: string;
+}
+
 export interface ConnectionOption {
   id: string;
   name: string;
@@ -531,3 +557,14 @@ export interface MessageTemplate {
   updatedAt: string;
 }
 export type TemplateInput = Pick<MessageTemplate, "kind" | "name" | "body"> & Partial<Pick<MessageTemplate, "subject" | "isDefault" | "ratings">>;
+
+export type AttributeType = "bool" | "enum" | "repeated_enum" | "url";
+export interface AttributeDef {
+  /** Google's attribute id without the "attributes/" prefix, e.g. "has_wheelchair_accessible_entrance". */
+  id: string;
+  label: string;
+  group: string;
+  type: AttributeType;
+  options?: { value: string; label: string }[];
+}
+export type AttributeValue = boolean | string | string[];

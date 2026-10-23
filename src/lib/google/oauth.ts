@@ -5,12 +5,14 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import { db } from "@/lib/db";
+import { currentTenant } from "@/lib/gbp/tenant-context";
 
-export type GooglePurpose = "gbp" | "gmail";
+export type GooglePurpose = "gbp" | "gmail" | "searchconsole";
 
 const SCOPES: Record<GooglePurpose, string[]> = {
   gbp: ["https://www.googleapis.com/auth/business.manage"],
   gmail: ["https://www.googleapis.com/auth/gmail.send"],
+  searchconsole: ["https://www.googleapis.com/auth/webmasters.readonly"],
 };
 const BASE_SCOPES = ["openid", "email", "profile"];
 const STATE_COOKIE = "gbpn_oauth";
@@ -19,15 +21,21 @@ export const googleOAuthConfigured = () => !!process.env.GOOGLE_CLIENT_ID && !!p
 const redirectUri = () => process.env.GOOGLE_REDIRECT_URI || "http://localhost:3001/";
 const secret = () => new TextEncoder().encode(process.env.SESSION_SECRET);
 
-// ---------------------------------------------------------------- token encryption (AES-256-GCM)
+/** Tokens belong to a workspace: "<workspace id>:gbp". Without one (open demo, no sign-in) the plain purpose is used. */
+const tokenKey = (purpose: GooglePurpose) => {
+  const t = currentTenant();
+  return t ? `${t.id}:${purpose}` : purpose;
+};
+
+// ---------------------------------------------------------------- token encryption (AES-256-GCM) — also used for Meta tokens (meta/oauth.ts)
 const key = () => createHash("sha256").update(`google-token:${process.env.SESSION_SECRET}`).digest();
-function seal(text: string) {
+export function seal(text: string) {
   const iv = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", key(), iv);
   const data = Buffer.concat([c.update(text, "utf8"), c.final()]);
   return [iv, c.getAuthTag(), data].map((b) => b.toString("base64url")).join(".");
 }
-function open(sealed: string) {
+export function open(sealed: string) {
   const [iv, tag, data] = sealed.split(".").map((s) => Buffer.from(s, "base64url"));
   const d = createDecipheriv("aes-256-gcm", key(), iv);
   d.setAuthTag(tag);
@@ -63,7 +71,7 @@ export async function finishGoogleAuth(url: URL): Promise<{ purpose: GooglePurpo
   let returnTo = "/settings";
   try {
     const { payload } = await jwtVerify(url.searchParams.get("state")!, secret(), { algorithms: ["HS256"] });
-    purpose = payload.purpose === "gbp" || payload.purpose === "gmail" ? payload.purpose : null;
+    purpose = payload.purpose === "gbp" || payload.purpose === "gmail" || payload.purpose === "searchconsole" ? payload.purpose : null;
     returnTo = typeof payload.returnTo === "string" && payload.returnTo.startsWith("/") && !payload.returnTo.startsWith("//") ? payload.returnTo : returnTo;
     const jar = await cookies();
     const nonce = jar.get(STATE_COOKIE)?.value;
@@ -96,11 +104,16 @@ export async function finishGoogleAuth(url: URL): Promise<{ purpose: GooglePurpo
     return {
       purpose,
       returnTo,
-      error: purpose === "gmail" ? "Tick “Send email on your behalf” on Google's page to connect Gmail." : "Tick “See, edit, create and delete your Google business listings” to connect.",
+      error:
+        purpose === "gmail"
+          ? "Tick “Send email on your behalf” on Google's page to connect Gmail."
+          : purpose === "searchconsole"
+            ? "Tick “View Search Console data for your verified sites” on Google's page to connect Search Console."
+            : "Tick “See, edit, create and delete your Google business listings” to connect.",
     };
 
   const me = (await (await fetch("https://openidconnect.googleapis.com/v1/userinfo", { headers: { Authorization: `Bearer ${tok.access_token}` } })).json()) as { email?: string; name?: string };
-  const existing = await db.googleToken.findUnique({ where: { purpose } });
+  const existing = await db.googleToken.findUnique({ where: { purpose: tokenKey(purpose) } });
   const data = {
     email: me.email ?? "unknown",
     name: me.name ?? null,
@@ -110,7 +123,7 @@ export async function finishGoogleAuth(url: URL): Promise<{ purpose: GooglePurpo
     refreshToken: tok.refresh_token ? seal(tok.refresh_token) : (existing?.refreshToken ?? null),
     expiresAt: new Date(Date.now() + (tok.expires_in ?? 3600) * 1000),
   };
-  await db.googleToken.upsert({ where: { purpose }, create: { purpose, ...data }, update: data });
+  await db.googleToken.upsert({ where: { purpose: tokenKey(purpose) }, create: { purpose: tokenKey(purpose), ...data }, update: data });
   return { purpose, returnTo, email: data.email };
 }
 
@@ -118,7 +131,7 @@ export async function finishGoogleAuth(url: URL): Promise<{ purpose: GooglePurpo
 export async function googleAccount(purpose: GooglePurpose) {
   if (!googleOAuthConfigured()) return null;
   try {
-    const t = await db.googleToken.findUnique({ where: { purpose } });
+    const t = await db.googleToken.findUnique({ where: { purpose: tokenKey(purpose) } });
     return t ? { email: t.email, name: t.name, connectedAt: t.createdAt.toISOString() } : null;
   } catch {
     return null;
@@ -127,8 +140,11 @@ export async function googleAccount(purpose: GooglePurpose) {
 
 /** A valid access token for `purpose` (refreshed when it's about to expire). Throws when not connected. */
 export async function googleAccessToken(purpose: GooglePurpose): Promise<string> {
-  const t = await db.googleToken.findUnique({ where: { purpose } });
-  if (!t) throw new Error(purpose === "gmail" ? "Connect Gmail in Settings → Email first" : "Connect Google Business Profile in Settings first");
+  const t = await db.googleToken.findUnique({ where: { purpose: tokenKey(purpose) } });
+  if (!t)
+    throw new Error(
+      purpose === "gmail" ? "Connect Gmail in Settings → Email first" : purpose === "searchconsole" ? "Connect Google Search Console first" : "Connect Google Business Profile in Settings first",
+    );
   if (t.expiresAt.getTime() - Date.now() > 60_000) return open(t.accessToken);
   if (!t.refreshToken) throw new Error("Google access expired. Disconnect and connect again.");
   const res = await fetch("https://oauth2.googleapis.com/token", {
@@ -138,7 +154,7 @@ export async function googleAccessToken(purpose: GooglePurpose): Promise<string>
   });
   const tok = (await res.json()) as { access_token?: string; expires_in?: number; error?: string };
   if (!res.ok || !tok.access_token) throw new Error(tok.error === "invalid_grant" ? "Google access was removed. Disconnect and connect again." : "Couldn't refresh Google access. Try again.");
-  await db.googleToken.update({ where: { purpose }, data: { accessToken: seal(tok.access_token), expiresAt: new Date(Date.now() + (tok.expires_in ?? 3600) * 1000) } });
+  await db.googleToken.update({ where: { purpose: tokenKey(purpose) }, data: { accessToken: seal(tok.access_token), expiresAt: new Date(Date.now() + (tok.expires_in ?? 3600) * 1000) } });
   return tok.access_token;
 }
 
@@ -165,9 +181,9 @@ export class GoogleApiError extends Error {
 
 /** Revoke at Google and forget the tokens. */
 export async function disconnectGoogle(purpose: GooglePurpose) {
-  const t = await db.googleToken.findUnique({ where: { purpose } });
+  const t = await db.googleToken.findUnique({ where: { purpose: tokenKey(purpose) } });
   if (!t) return;
   const token = t.refreshToken ? open(t.refreshToken) : open(t.accessToken);
   await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, { method: "POST" }).catch(() => {});
-  await db.googleToken.delete({ where: { purpose } });
+  await db.googleToken.delete({ where: { purpose: tokenKey(purpose) } });
 }

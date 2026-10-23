@@ -18,6 +18,7 @@ export function useOAuthReturn(onConnected?: (what: string) => void) {
     done.current = true;
     if (error) toast.error("Couldn't connect Google", { description: error });
     else if (connected === "gmail") toast.success("Gmail connected", { description: "Review request emails now send from your Gmail." });
+    else if (connected === "searchconsole") toast.success("Search Console connected", { description: "Choose the website for each location." });
     else if (connected) onConnected?.(connected);
     const next = new URLSearchParams(params);
     next.delete("connected");

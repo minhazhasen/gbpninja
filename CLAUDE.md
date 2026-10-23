@@ -48,15 +48,52 @@ a content calendar for posts, and a profile audit with in-app fixes.
   page and the Sign up agreement line; these URLs go on the Google OAuth consent screen (Branding).
 
 ## Architecture
+- **Workspaces (multi-tenant SaaS) — never break this.** Every signed-in person works in exactly one workspace: the one they were
+  invited to, or their own, created on first sign-in (they're its admin). `src/lib/gbp/tenancy.ts` (directory email → workspace,
+  `workspaceIdFor`, `resolveTenant`, `forEachWorkspace`, `tenantForInvite`, `assignUserWorkspace`, migration of the old shared
+  workspace) + `tenant-context.ts` (AsyncLocalStorage). `getProvider()` binds every call to the caller's workspace and saves it
+  (`AppState "workspace:<id>"`); mock.ts state is a per-workspace view (`current()`), and in live mode a call outside a workspace
+  throws instead of falling back to shared data. Google tokens are keyed `<workspace id>:gbp|gmail` (oauth.ts `tokenKey`); the OAuth
+  callback, invite page, cron (`forEachWorkspace`) and `after()` jobs run inside the right workspace explicitly. Platform store:
+  `currentWorkspaceId()` is async and per workspace (offers, meetings); real workspaces appear in Admin → Workspaces; suspended
+  workspaces are blocked in the app layout. Anything new that stores workspace data must go through the provider (or take the
+  workspace id) — never module-level state. Demo with sign-in: each user gets their own in-memory copy of the sample data.
 - `src/lib/gbp/types.ts` — domain types and the `GbpProvider` interface. **All data access goes through `getProvider()`** (`src/lib/gbp/index.ts`).
-  - `mock.ts` — in-memory demo data (default, `GBP_DATA_SOURCE=mock`), kept on `globalThis`. Resets on server restart.
-  - `google.ts` — real Google API provider. Methods are stubs; endpoints are documented at the top of the file.
+  - `mock.ts` — demo data (default, `GBP_DATA_SOURCE=mock`), kept on `globalThis`. Resets on server restart. Also the workspace
+    provider in live mode: there it starts empty (`liveMode()`, `emptyState()`) and its `workspace` state is loaded from SQLite.
+  - `live.ts` — live mode (`GBP_DATA_SOURCE=google`): `createLiveProvider()` = mock's workspace methods + real Google APIs for the
+    picked locations (connection targets `accounts/{a}/locations/{l}`): locations (Business Information, 15 min cache, merged in
+    place so Google-less fields like products/attributes/photos stay ours), reviews + replies (v4, 10 min), insights (Performance API,
+    6 h), keywords (monthly, 12 h), profile edits (PATCH with updateMask; categories looked up via categories.list), Google posts
+    (v4 localPosts; other channels fail honestly), photos (v4 `media` + `media/customers`, 30 min, refreshed in `listLocations`; Google
+    categories mapped via `MEDIA_CATEGORY`, `Photo.googleName` for PATCH category / DELETE, `fromCustomer` photos are read-only; `Photo.views` = media `insights.viewCount` when Google returns it (viewer row, tile badge,
+    "Most viewed" sort — all hidden when Google sends no count);
+    photos uploaded in the app stay local until upload-to-Google is built; load errors show as a "photos" sync issue on the audit page). A Proxy saves the workspace after every call (`persist.ts` → `AppState` table).
+    Access: `liveMember()` — the signed-in person's member record in their own workspace (invites are accepted on sign-in). No locations → `resolveLocation` redirects to `/welcome` (connect Google → pick profiles);
+    Settings works without a location. Full profile sync (no guessing): attributes from Business Information `locations/{l}/attributes` + Google's attribute list for
+    the profile (`attributes?parent=` — no languageCode with parent, Google rejects it; cached a day) → `Location.attributeCatalog` / `attributeValues` (More tab renders Google's
+    groups/labels/types: yes/no/—, choice, multi-choice, link), social links / booking / chat (WhatsApp, text) are URL attributes;
+    extra hours (`moreHours`, keeps `typeId`), services keep `serviceTypeId` + `currencyCode`. Saves go to Google: attributes PATCH with
+    `attributeMask`, address (`storefrontAddress`), holiday hours (`specialHours`), services (`serviceItems`), extra hours; the profile is
+    re-read after every PATCH. Products aren't in Google's API: `notInApi: ["products"]` → audit skips product checks, Products tab says
+    so. Service area / hide address edits are refused with "change it on Google" (Google needs place ids). Not real yet: uploading new photos to Google, attributes/services push, Search Console, Facebook/
+    Instagram/LinkedIn/X publishing, Google returns quota 0 until the Cloud project's
+    GBP API access is approved (`gbpErrorMessage`).
+  - `google.ts` — older stub provider kept for its endpoint notes; not used.
 - `src/lib/posts.ts` — multi-channel post model (Google / Facebook / Instagram / LinkedIn / X), ported from TasksBook's
   `lib/marketing.ts`: `PostDraft`, `validatePost` (shared by composer and server actions), per-channel text/media rules.
   Posts are workspace-wide; `google.locations` ([] = all) decides which locations' calendars show them.
 - `src/components/marketing/` — `post-composer.tsx` (two-pane modal + live previews), `post-previews.tsx`,
   `content-board.tsx` (week/month/list calendar, @dnd-kit drag-to-reschedule with undo toast), `channel-icon.tsx`.
   Images are resized client-side and stored as data: URLs until real file storage exists.
+  Posts made outside the app: `Post.imported` ({ channel, external_id }) — live mode imports Google local posts (`importGooglePosts`,
+  v4 localPosts, 30 min, per location; skips posts whose id is in an app post's `results.google.external_ids`, which publish now records);
+  demo seeds imported posts for every network. Read-only in the composer ("Imported" pill + note), ↓ marker on calendar chips.
+  Performance (`post-performance.tsx`, shown for published posts): `Post.stats` per channel (`PostStats`: views, reach, clicks, likes,
+  comments, shares, saves — filled when Facebook/Instagram/LinkedIn/X sync is real; demo has numbers), list view "Performance" column via
+  `postEngagement`. Only networks whose API reports per-post stats are shown (`STATS_CHANNELS`, `postStatChannels`); Google isn't: its per-post views
+  are only in Google's own dashboard (back since Sept 2026), not its API. Product rule: performance is never typed in or estimated —
+  if a network can't report it automatically, don't show it. Add Google when its API exposes post views.
 - `src/lib/audit.ts` — section-by-section profile audit (basics, categories, description, hours, services, attributes, photos,
   reviews, activity). Each check has points; "warn" earns half; score = earned/max. Pass posts in so scores match across pages.
 - `src/lib/profile.ts` — Google limits, attribute labels, suggested-description template. Suggestions (secondary categories,
@@ -68,7 +105,8 @@ a content calendar for posts, and a profile audit with in-app fixes.
   logo/cover/gallery upload (`Location.photos`, Google media categories; provider `addPhotos/updatePhoto/deletePhoto`, counts derived);
   attributes catalogue is `ATTRIBUTE_GROUPS` in `profile.ts`; days can have several `regularHours` periods (split shifts).
   `profile-preview.tsx` (Google Maps phone mock, shows unsaved drafts; Checklist tab only), `guide-panel.tsx` (right column on
-  editor tabs: recommended / avoid / example for the open field), `shared.tsx`. Services are `ServiceItem[]` (category, price type,
+  editor tabs: recommended / avoid / example for the open field) — examples come from this profile's own data (services, hours, links, Google's unanswered
+  attributes); with nothing set, a neutral format hint — never another business or a fixed city, `shared.tsx`. Services are `ServiceItem[]` (category, price type,
   price, description); `Location.products` is optional `Product[]`.
 - Settings has tabs via `?tab=` (page owns PageHeader + PillTabs): `accounts` (connections-board, Data sources), `email`
   (`settings/email-settings.tsx`: Gmail sender — provider `getEmailSender/connectGmail/updateEmailSender/disconnectGmail/sendEmail`,
@@ -77,6 +115,15 @@ a content calendar for posts, and a profile audit with in-app fixes.
   provider `listTemplates/saveTemplate/deleteTemplate`, one default per kind). Reviews uses them: the reply dialog's Templates menu
   (best match for the rating first) and Request a review (template picker, editable subject/body, "Send email" through Gmail when
   connected — `createReviewRequest({ viaGmail })` — else mailto/sms/copy). Account rows share `settings/account-grid.tsx`.
+- Facebook Page + Instagram (real when `META_APP_ID/SECRET/LOGIN_CONFIG_ID` are set, demo or live): `src/lib/meta/oauth.ts` — Facebook
+  Login for Business with our configuration (`config_id`), callback `src/app/api/oauth/meta/callback` (`META_REDIRECT_URI`), long-lived
+  user token + Page tokens (with linked Instagram business accounts) stored encrypted per workspace in the token table
+  (`<ws>:meta`, `<ws>:meta:pages`; `seal/open` from google/oauth.ts), `graph()` with readable errors (190 = expired → reconnect).
+  Provider (mock.ts): Facebook/Instagram rows follow the token, options = real Pages / linked Instagram accounts, disconnecting the last of
+  the two revokes access, `publishMeta()` → `src/lib/meta/publish.ts`: Facebook feed / photo (direct upload of data: URLs) / multi-photo
+  (unpublished photos + attached_media) / video, Instagram image / carousel / Reel (container → wait FINISHED → media_publish), optional
+  first comment, permalink + id in `results[ch]`. Instagram needs public media links: `src/lib/public-media.ts` saves data: URLs beside
+  the DB (`media/`, random 48-hex names) served by `/api/media/[file]` at `APP_URL` — refuses on localhost. Webhooks / App Review: later.
 - `src/lib/connections.ts` + Settings (`src/components/settings/connections-board.tsx`) — connected accounts for Google,
   Facebook, Instagram, LinkedIn and X (connect → pick locations/Page/account → sync/disconnect). Demo mode simulates OAuth;
   live mode needs each network's app keys (see `.env.example`). `getConnectedChannels()` derives from connections.
@@ -89,8 +136,12 @@ a content calendar for posts, and a profile audit with in-app fixes.
   in `src/lib/search-console.ts`. Query detail `/ranking/search?q=…` (`search-query-detail.tsx`, provider `getSearchConsoleQuery`): metric
   chart, pages, devices, by-day table; rows link there with `queryHref`. Search Console is connected in Settings → Data sources
   (`settings/search-console-card.tsx`: Connect with Google → choose a property per location); provider `getSearchConsole/
-  connectSearchConsole/listSearchConsoleProperties/setSearchConsoleSites/getSearchConsoleReport`. Demo simulates it; live needs the Google
-  OAuth app + `webmasters.readonly` scope and the Search Console API (endpoints documented in `google.ts`).
+  connectSearchConsole/listSearchConsoleProperties/setSearchConsoleSites/getSearchConsoleReport`. Demo simulates it. Live (live.ts): its own OAuth purpose
+  `searchconsole` (`webmasters.readonly`, token `<workspace>:searchconsole`) — Connect → Google consent → back at
+  `/settings?pick=searchconsole#search-console`, which opens the website picker; properties from `webmasters/v3/sites` (verified only),
+  websites auto-matched to locations (URL-prefix, then `sc-domain:`); reports via `searchAnalytics/query` (query / date / totals, previous
+  period for compare; detail = query `equals` filter with date / page / device), `dataState: "final"`. Errors (API not enabled in the Cloud
+  project, access removed) show on the Ranking page. Needs the "Google Search Console API" enabled and the scope on the OAuth consent screen.
 - Competitors (`src/app/(app)/competitors`, `src/components/competitors/competitors-board.tsx`) — this profile (pinned "You" row, its own
   reviews/rating from `listReviews`) next to nearby businesses with the same main category from provider `listCompetitors` (`Competitor`:
   name, address, distance, primary + sub-categories, rating, review count, website). Sortable table (stacked cards below `lg`), stat strip
@@ -182,6 +233,8 @@ The UI matches the **TasksBook CRM marketing section** (shadcn/ui look, ported t
 - Never commit `.env*` files or real tokens.
 - Overlays (dialogs, drag previews) go through a portal on `<body>`; never leave a `transform` on `<main>` (it traps `position: fixed`).
 - Toasts: `sonner` (`toast.success/error`), mounted in the root layout.
+- Every `<img>` showing a photo from data (Google photos `lh3.googleusercontent.com`, post media, logos) needs `referrerPolicy="no-referrer"`:
+  Google refuses those images when the browser sends our site as the referrer. (Not site-wide: Firebase API keys can be referrer-restricted.)
 
 ## Google API notes
 - GBP APIs require an approved access request for the Cloud project (quota is 0 until approved).

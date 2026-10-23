@@ -1,11 +1,24 @@
-// Platform data. Demo: in memory on globalThis (resets on restart) — move to Prisma (Workspace, Announcement, Offer,
-// OfferLead, AdminLog). The current workspace's profiles and members come live from the GBP provider,
+// Platform data. Demo: in memory on globalThis (resets on restart). Live (GBP_DATA_SOURCE=google): one JSON document in SQLite
+// (AppState "platform", saved every few seconds). The current workspace's profiles and members come live from the GBP provider,
 // so changes made here show up in the app straight away.
 import { getProvider } from "@/lib/gbp";
-import { type AdminLogEntry, type Announcement, type LeadStatus, type Offer, type OfferLead, type Workspace, type WorkspaceMember, type WorkspaceProfile, isUpcomingMeeting, MEETING_MINUTES } from "./types";
+import { loadDoc, saveDoc } from "@/lib/gbp/persist";
+import { listTenants, resolveTenant } from "@/lib/gbp/tenancy";
+import { currentTenant } from "@/lib/gbp/tenant-context";
+import {
+  type AdminLogEntry,
+  type Announcement,
+  type LeadStatus,
+  type Offer,
+  type OfferLead,
+  type Workspace,
+  type WorkspaceMember,
+  type WorkspaceProfile,
+  isUpcomingMeeting,
+  MEETING_MINUTES,
+} from "./types";
 
 const CURRENT_ID = "ws_demo";
-
 
 type StoredWorkspace = Omit<Workspace, "profiles" | "members"> & { profiles: WorkspaceProfile[]; members: WorkspaceMember[] };
 
@@ -16,7 +29,18 @@ function seedWorkspaces(): StoredWorkspace[] {
   const member = (name: string, email: string, role: "admin" | "member" = "member", lastActive = 1): WorkspaceMember => ({ name, email, role, status: "active", lastActiveAt: daysAgo(lastActive) });
   return [
     // Profiles and members of the current workspace are read from the provider (see hydrate()).
-    { id: CURRENT_ID, name: "Demo workspace", ownerName: "Demo User", ownerEmail: "you@example.com", status: "active", createdAt: daysAgo(120), lastActiveAt: daysAgo(0), current: true, profiles: [], members: [] },
+    {
+      id: CURRENT_ID,
+      name: "Demo workspace",
+      ownerName: "Demo User",
+      ownerEmail: "you@example.com",
+      status: "active",
+      createdAt: daysAgo(120),
+      lastActiveAt: daysAgo(0),
+      current: true,
+      profiles: [],
+      members: [],
+    },
     {
       id: "ws_brightsmile",
       name: "Bright Smile Dental Group",
@@ -98,15 +122,44 @@ interface PlatformState {
   offerClosed?: Record<string, string>;
 }
 
+const live = process.env.GBP_DATA_SOURCE === "google";
 const g = globalThis as unknown as { __platformV1?: PlatformState };
-const state: PlatformState = (g.__platformV1 ??= {
-  workspaces: seedWorkspaces(),
-  announcements: [],
-  log: [
-    { id: "log_1", at: daysAgo(3), actor: "platform", action: "Suspended workspace", target: "Northside Vets" },
-  ],
-  seq: 10,
-});
+const state: PlatformState = (g.__platformV1 ??= live
+  ? // Live: saved in SQLite (AppState "platform"); a new install has just this workspace.
+    (loadDoc<PlatformState>("platform") ?? {
+      workspaces: [
+        {
+          id: CURRENT_ID,
+          name: "My workspace",
+          ownerName: "",
+          ownerEmail: "",
+          status: "active",
+          createdAt: new Date().toISOString(),
+          lastActiveAt: new Date().toISOString(),
+          current: true,
+          profiles: [],
+          members: [],
+        },
+      ],
+      announcements: [],
+      log: [],
+      seq: 10,
+    })
+  : {
+      workspaces: seedWorkspaces(),
+      announcements: [],
+      log: [{ id: "log_1", at: daysAgo(3), actor: "platform", action: "Suspended workspace", target: "Northside Vets" }],
+      seq: 10,
+    });
+// Live: save every few seconds when something changed (saveDoc skips unchanged state), and on shutdown.
+const flush = () => saveDoc("platform", state);
+const gs = globalThis as unknown as { __platformSaver?: boolean };
+if (live && !gs.__platformSaver) {
+  gs.__platformSaver = true;
+  setInterval(flush, 3000).unref();
+  process.once("beforeExit", flush);
+  process.once("SIGTERM", () => (flush(), process.exit(0)));
+}
 const nextId = (prefix: string) => `${prefix}_${++state.seq}`;
 // Added after the first release of this state: fill in without wiping the rest.
 state.offers ??= [
@@ -146,8 +199,56 @@ for (const l of state.leads) {
 
 // ---------------------------------------------------------------- workspaces
 
-/** Fill the current workspace from the provider (profiles, members). */
+/**
+ * Real workspaces (tenancy.ts) get a row here the first time they're seen, so the admin can name, note and suspend them.
+ * Records from before workspaces existed were filed under the fixed demo id: they move to the oldest real workspace.
+ */
+function syncTenantRows() {
+  const tenants = listTenants().filter((t) => t.id !== "w_local" || live);
+  for (const t of tenants) {
+    if (state.workspaces.some((w) => w.id === t.id)) continue;
+    const owner = t.state.members.find((m) => m.role === "admin" && m.status === "active");
+    state.workspaces.push({
+      id: t.id,
+      name: t.state.locations[0]?.title || owner?.name || t.owner,
+      ownerName: owner?.name ?? "",
+      ownerEmail: owner?.email ?? t.owner,
+      status: "active",
+      createdAt: t.createdAt,
+      lastActiveAt: null,
+      profiles: [],
+      members: [],
+    });
+  }
+  const legacy = live && tenants.length ? state.workspaces.find((w) => w.id === CURRENT_ID) : undefined;
+  if (legacy) {
+    const heir = [...tenants].sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0].id;
+    for (const l of state.leads ?? []) if (l.workspaceId === CURRENT_ID) l.workspaceId = heir;
+    for (const k of Object.keys(state.offerClosed ?? {}))
+      if (k.startsWith(`${CURRENT_ID}|`)) {
+        state.offerClosed![`${heir}|${k.slice(CURRENT_ID.length + 1)}`] = state.offerClosed![k];
+        delete state.offerClosed![k];
+      }
+    state.workspaces = state.workspaces.filter((w) => w.id !== CURRENT_ID);
+  }
+}
+
+/** Fill a workspace's profiles and members: real workspaces from their own data, the open demo from the provider. */
 async function hydrate(w: StoredWorkspace): Promise<Workspace> {
+  const tenant = listTenants().find((t) => t.id === w.id);
+  if (tenant) {
+    const s = tenant.state;
+    const owner = s.members.find((m) => m.role === "admin" && m.status === "active");
+    return {
+      ...structuredClone(w),
+      current: w.id === (await currentWorkspaceId()),
+      ownerName: owner?.name || w.ownerName,
+      ownerEmail: owner?.email || w.ownerEmail,
+      lastActiveAt: s.members.map((m) => m.lastActiveAt ?? "").sort().pop() || w.lastActiveAt,
+      profiles: s.locations.map((l): WorkspaceProfile => ({ id: l.id, title: l.title, address: l.address })),
+      members: s.members.map((m) => ({ name: m.name, email: m.email, role: m.role, status: m.status, lastActiveAt: m.lastActiveAt ?? null })),
+    };
+  }
   if (!w.current) return structuredClone(w);
   const provider = await getProvider();
   const [locations, members] = await Promise.all([provider.listLocations(), provider.listMembers()]);
@@ -168,12 +269,19 @@ const find = (id: string) => {
   return w;
 };
 
-export const listWorkspaces = () => Promise.all(state.workspaces.map(hydrate));
+export const listWorkspaces = () => {
+  syncTenantRows();
+  return Promise.all(state.workspaces.map(hydrate));
+};
 export const getWorkspace = async (id: string) => {
+  syncTenantRows();
   const w = state.workspaces.find((x) => x.id === id);
   return w ? hydrate(w) : null;
 };
-export const currentWorkspaceId = () => CURRENT_ID;
+/** The signed-in person's workspace (the fixed demo workspace in the open demo). */
+export async function currentWorkspaceId() {
+  return (currentTenant() ?? (await resolveTenant()))?.id ?? CURRENT_ID;
+}
 
 export function updateWorkspace(id: string, patch: Partial<Pick<Workspace, "status" | "notes" | "name">>) {
   Object.assign(find(id), patch);
@@ -181,6 +289,7 @@ export function updateWorkspace(id: string, patch: Partial<Pick<Workspace, "stat
 
 export function deleteWorkspace(id: string) {
   if (find(id).current) throw new Error("This app's own workspace can't be deleted");
+  if (listTenants().some((t) => t.id === id)) throw new Error("A customer's workspace can't be deleted here yet. Suspend it instead.");
   state.workspaces = state.workspaces.filter((w) => w.id !== id);
 }
 
@@ -292,9 +401,10 @@ export const takenSlots = async () => heldTimes().filter((t) => new Date(t).getT
 
 /** Book a meeting (one upcoming meeting per offer + profile; one meeting per time slot). */
 export async function addLead(input: Omit<OfferLead, "id" | "status" | "createdAt" | "workspaceId" | "workspaceName">): Promise<OfferLead> {
-  const ws = state.workspaces.find((w) => w.current)!;
+  const ws = (await getWorkspace(await currentWorkspaceId())) ?? state.workspaces.find((w) => w.current)!;
   // Clients can't move a meeting by booking again; they request a new time instead.
-  if (state.leads!.some((l) => l.offerId === input.offerId && l.profileId === input.profileId && isUpcomingMeeting(l))) throw new Error("You already have a meeting booked. Request a new time from the meeting card.");
+  if (state.leads!.some((l) => l.offerId === input.offerId && l.profileId === input.profileId && isUpcomingMeeting(l)))
+    throw new Error("You already have a meeting booked. Request a new time from the meeting card.");
   if (clashes(input.meetingAt)) throw new Error("That time was just booked. Pick another one.");
   const lead: OfferLead = { id: nextId("lead"), ...input, workspaceId: ws.id, workspaceName: ws.name, status: "booked", createdAt: new Date().toISOString() };
   state.leads!.push(lead);
@@ -312,7 +422,12 @@ export const getLead = async (id: string) => {
   return l ? { ...l } : null;
 };
 
-export function updateLead(id: string, patch: Partial<Pick<OfferLead, "status" | "meetUrl" | "meetSharedAt" | "adminNote" | "meetingAt" | "reminderClosedAt" | "changeRequest" | "changeAnswer" | "cancelled" | "cancelRequest" | "cancelAnswer">>) {
+export function updateLead(
+  id: string,
+  patch: Partial<
+    Pick<OfferLead, "status" | "meetUrl" | "meetSharedAt" | "adminNote" | "meetingAt" | "reminderClosedAt" | "changeRequest" | "changeAnswer" | "cancelled" | "cancelRequest" | "cancelAnswer">
+  >,
+) {
   const l = state.leads!.find((x) => x.id === id);
   if (!l) throw new Error("Meeting not found");
   if (patch.meetingAt && patch.meetingAt !== l.meetingAt && clashes(patch.meetingAt, id)) throw new Error("Another meeting is booked at that time");
@@ -326,5 +441,8 @@ export function deleteLead(id: string) {
 }
 
 /** The client's upcoming meeting for a profile (shown on their Dashboard). */
-export const upcomingMeetingFor = async (profileId: string) =>
-  state.leads!.filter((l) => l.profileId === profileId && isUpcomingMeeting(l)).sort((a, b) => a.meetingAt.localeCompare(b.meetingAt))[0] ?? null;
+/** The current workspace's next meeting for a profile (two workspaces can manage the same Google profile). */
+export const upcomingMeetingFor = async (profileId: string) => {
+  const ws = await currentWorkspaceId();
+  return state.leads!.filter((l) => l.workspaceId === ws && l.profileId === profileId && isUpcomingMeeting(l)).sort((a, b) => a.meetingAt.localeCompare(b.meetingAt))[0] ?? null;
+};

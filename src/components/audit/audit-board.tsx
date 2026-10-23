@@ -506,7 +506,23 @@ function SectionPanel({ section, total, defaultOpen, children }: { section: Audi
 
 function SectionBody({ id, location, suggestions }: { id: SectionId; location: Location; suggestions: ProfileSuggestions }) {
   if (id === "services") return <ServicesEditor location={location} suggestions={suggestions} />;
-  if (id === "products") return <ProductsEditor location={location} suggestions={suggestions.products} />;
+  if (id === "products")
+    return location.notInApi?.includes("products") ? (
+      <Card className="flex flex-col items-start gap-3 px-5 py-5 sm:flex-row sm:items-center lg:px-6">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+          <Package className="h-5 w-5" />
+        </span>
+        <div className="min-w-0 flex-1 text-sm">
+          <p className="font-semibold">Products are managed in Google Business Profile</p>
+          <p className="text-muted-foreground">Google doesn&apos;t share or accept products through its API, so they aren&apos;t shown or scored here.</p>
+        </div>
+        <a href={GOOGLE_URL} target="_blank" rel="noreferrer" className={buttonClass("outline", "sm")}>
+          Open Google <ExternalLink />
+        </a>
+      </Card>
+    ) : (
+      <ProductsEditor location={location} suggestions={suggestions.products} />
+    );
   if (id === "photos") return <PhotosPanel location={location} />;
   return null;
 }

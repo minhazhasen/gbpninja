@@ -11,13 +11,22 @@ export default async function RankingPage({ searchParams }: { searchParams: Prom
   const { location } = await resolveLocation(searchParams);
   const sp = await searchParams;
   const provider = await getProvider();
-  const [connection, report] = await Promise.all([provider.getSearchConsole(), provider.getSearchConsoleReport(location.id, scRange(sp))]);
+  const connection = await provider.getSearchConsole();
+  // Google can refuse (API not turned on, access removed): show why instead of breaking the page.
+  let report = null;
+  let error: string | null = null;
+  try {
+    report = await provider.getSearchConsoleReport(location.id, scRange(sp));
+  } catch (e) {
+    error = e instanceof Error ? e.message : "Google Search Console didn't answer. Try again in a minute.";
+  }
   return (
     <SearchConsoleBoard
       key={location.id}
       location={{ id: location.id, title: location.title }}
       connection={connection}
       report={report}
+      error={error}
       canConnect={channelAvailable("google")}
     />
   );

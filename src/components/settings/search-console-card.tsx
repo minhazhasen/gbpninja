@@ -2,7 +2,7 @@
 
 // Settings → Data sources: connect Google Search Console (free rankings) and choose each location's website property.
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { formatDistanceToNow, parseISO } from "date-fns";
 import { toast } from "sonner";
 import { Globe, Loader2, MoreHorizontal, RefreshCw, TriangleAlert, Unplug } from "lucide-react";
@@ -48,11 +48,22 @@ export function SearchConsoleCard({
   const [busy, setBusy] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const connected = connection.status === "connected";
+  // Back from Google's consent page (?pick=searchconsole): open the website picker once.
+  const params = useSearchParams();
+  const pathname = usePathname();
+  useEffect(() => {
+    if (params.get("pick") !== "searchconsole" || !connected) return;
+    setPicking(true);
+    const next = new URLSearchParams(params);
+    next.delete("pick");
+    router.replace(`${pathname}${next.size ? `?${next}` : ""}#search-console`, { scroll: false });
+  }, [params, connected, pathname, router]);
   const linked = locations.filter((l) => connection.sites[l.id]);
 
   const connect = async () => {
     setBusy("connect");
     const res = await connectSearchConsole();
+    if (res.ok && res.redirect) return void window.location.assign(res.redirect);
     setBusy(null);
     if (!res.ok) return void toast.error(res.error);
     if (demo) toast.message("Demo: signed in with Google", { description: "In live mode this opens Google's sign-in to allow read-only Search Console access." });

@@ -86,7 +86,7 @@ function ServiceModal({
           </div>
           <div>
             <FieldHead label="Service name" htmlFor="svc-name" count={f.name.length} max={120} />
-            <input id="svc-name" autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={120} placeholder="e.g. Teeth whitening" className={cn(inputClass, "h-10")} />
+            <input id="svc-name" autoFocus value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} maxLength={120} placeholder="Name of the service, as customers search for it" className={cn(inputClass, "h-10")} />
           </div>
           <div>
             <FieldHead label="Price" />
@@ -301,7 +301,7 @@ function ProductModal({
               {f.photo ? (
                 <>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={f.photo} alt="" className="absolute inset-0 h-full w-full object-cover" />
+                  <img referrerPolicy="no-referrer" src={f.photo} alt="" className="absolute inset-0 h-full w-full object-cover" />
                   <span className="absolute inset-x-2 bottom-2 rounded-md bg-card/90 py-1 text-center font-medium text-foreground opacity-0 transition-opacity group-hover:opacity-100">Replace photo</span>
                 </>
               ) : (
@@ -427,7 +427,7 @@ export function ProductsEditor({ location, suggestions }: { location: Location; 
               <button key={p.name} type="button" onClick={() => setEditing({ index: i, item: p })} className="group overflow-hidden rounded-xl border text-left transition-colors hover:border-primary/40">
                 <span className="relative flex aspect-[4/3] items-center justify-center bg-muted">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  {p.photo ? <img src={p.photo} alt="" className="h-full w-full object-cover" /> : <Package className="h-7 w-7 text-muted-foreground/50" />}
+                  {p.photo ? <img referrerPolicy="no-referrer" src={p.photo} alt="" className="h-full w-full object-cover" /> : <Package className="h-7 w-7 text-muted-foreground/50" />}
                   <span className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-card/90 opacity-0 shadow-sm transition-opacity group-hover:opacity-100">
                     <Pencil className="h-3.5 w-3.5" />
                   </span>

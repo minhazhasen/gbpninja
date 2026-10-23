@@ -14,7 +14,8 @@ export default async function SearchQueryPage({ searchParams }: { searchParams: 
   const query = sp.q?.trim().toLowerCase();
   if (!query) redirect(withLocation("/ranking", location.id));
   const provider = await getProvider();
-  const detail = await provider.getSearchConsoleQuery(location.id, query, scRange(sp));
+  // Google refused (API off, access removed): the Ranking page explains why.
+  const detail = await provider.getSearchConsoleQuery(location.id, query, scRange(sp)).catch(() => null);
   // Not connected / no website picked: the Ranking page explains how to connect.
   if (!detail) redirect(withLocation("/ranking", location.id));
   return <SearchQueryDetail key={`${location.id}|${query}`} location={{ id: location.id, title: location.title }} detail={detail} />;

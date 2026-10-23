@@ -9,10 +9,7 @@ const hash = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >
 export function ReviewAvatar({ name, photo, className }: { name: string; photo?: string | null; className?: string }) {
   if (photo) return <img src={photo} alt="" referrerPolicy="no-referrer" className={cn("h-9 w-9 shrink-0 rounded-full object-cover", className)} />;
   return (
-    <span
-      className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white", AVATAR_BG[hash(name) % AVATAR_BG.length], className)}
-      aria-hidden
-    >
+    <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white", AVATAR_BG[hash(name) % AVATAR_BG.length], className)} aria-hidden>
       {initials(name).slice(0, 1) || "?"}
     </span>
   );
@@ -45,10 +42,7 @@ export function StarBars({ dist, onPick, active, className }: { dist: number[]; 
               <Star className="h-3 w-3 fill-current" />
             </span>
             <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-              <span
-                className="block h-2 rounded-full"
-                style={{ width: `${(count / max) * 100}%`, background: stars >= 4 ? "var(--viz-2)" : stars === 3 ? "var(--viz-1)" : "var(--viz-3)" }}
-              />
+              <span className="block h-2 rounded-full" style={{ width: `${(count / max) * 100}%`, background: stars >= 4 ? "var(--viz-2)" : stars === 3 ? "var(--viz-1)" : "var(--viz-3)" }} />
             </span>
             <span className="w-16 shrink-0 text-right text-sm tabular-nums">
               {count}

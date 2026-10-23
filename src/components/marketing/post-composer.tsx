@@ -11,6 +11,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, ChevronDown, Copy, ExternalLink, Ima
 import { buttonClass, inputClass } from "@/components/ui";
 import { Modal, Segmented, Switch, useConfirm } from "@/components/ui-client";
 import { DateField, DateTimeField } from "@/components/date-time-field";
+import { PostPerformance } from "@/components/marketing/post-performance";
 import { ChannelIcon } from "@/components/marketing/channel-icon";
 import { FacebookPreview, GooglePreview, InstagramPreview, LinkedInPreview, XPreview, type PreviewAccount } from "@/components/marketing/post-previews";
 import { deletePost, publishPost, savePost } from "@/app/(app)/actions";
@@ -44,6 +45,7 @@ import {
   type PostIssue,
   type PostMedia,
   type WhenMode,
+  postStatChannels,
 } from "@/lib/posts";
 import { cn } from "@/lib/utils";
 
@@ -279,10 +281,19 @@ export function PostComposer({
   const del = async () => {
     setMenuOpen(false);
     if (!post) return;
-    const live = post.status === "published" || post.status === "partially_failed";
+    // Where it's live: deleted there too on Facebook and Google; Instagram (and LinkedIn / X for now) only in their own apps.
+    const liveOn = post.channels.filter((c) => post.results?.[c]?.status === "published");
+    if (post.imported && !liveOn.includes(post.imported.channel)) liveOn.push(post.imported.channel);
+    const removed = liveOn.filter((c) => c === "facebook" || c === "google");
+    const stays = liveOn.filter((c) => c !== "facebook" && c !== "google");
+    const list = (cs: Channel[]) => cs.map((c) => CHANNEL_LABEL[c]).join(" and ");
     const ok = await confirm({
       title: "Delete this post?",
-      description: live ? "It will be removed from this app. Posts already live on a channel stay there until removed on that platform." : undefined,
+      description: liveOn.length
+        ? [removed.length ? `It's also deleted from ${list(removed)}.` : "", stays.length ? `${list(stays)} doesn't let apps delete posts — remove it in the ${list(stays)} app.` : ""]
+            .filter(Boolean)
+            .join(" ")
+        : undefined,
       confirmLabel: "Delete",
       tone: "danger",
     });
@@ -356,7 +367,10 @@ export function PostComposer({
   };
 
   const addTags = (raw: string) => {
-    const tags = raw.split(/[\s,]+/).map(normalizeHashtag).filter(Boolean);
+    const tags = raw
+      .split(/[\s,]+/)
+      .map(normalizeHashtag)
+      .filter(Boolean);
     if (!tags.length) return setTagInput("");
     const seen = new Set(draft.hashtags.map((t) => t.toLowerCase()));
     set({ hashtags: [...draft.hashtags, ...tags.filter((t) => !seen.has(t.toLowerCase()) && (seen.add(t.toLowerCase()), true))] });
@@ -402,526 +416,582 @@ export function PostComposer({
 
   // ------------------------------------------------------------ render
   const form = (
-    <fieldset disabled={locked} className="min-w-0">
-      {post?.results && Object.keys(post.results).length > 0 && (
-        <Section title="Results">
-          <ul className="divide-y rounded-lg border">
-            {CHANNELS.filter((c) => post.channels.includes(c)).map((c) => {
-              const r = post.results?.[c];
-              const st = r?.status ?? "pending";
-              return (
-                <li key={c} className="flex items-start gap-3 px-3 py-2.5 text-sm">
-                  <ChannelIcon channel={c} className="mt-0.5" />
-                  <div className="min-w-0 flex-1">
-                    <p className="flex flex-wrap items-center gap-x-2">
-                      <span className="font-semibold">{CHANNEL_LABEL[c]}</span>
-                      <span className={cn("rounded-md px-1.5 py-0.5 text-[11px] font-semibold", st === "published" ? "bg-success/10 text-success" : st === "failed" ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning")}>
-                        {st === "published" ? "Published" : st === "failed" ? "Failed" : "Pending"}
-                      </span>
-                      {r?.posted_at && <span className="text-xs text-muted-foreground">{format(parseISO(r.posted_at), "d MMM, h:mm a")}</span>}
-                    </p>
-                    {r?.error && <p className="text-xs text-destructive">{r.error}</p>}
-                  </div>
-                  {r?.permalink && (
-                    <a href={r.permalink} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-primary hover:underline">
-                      View on {CHANNEL_LABEL[c]} <ExternalLink className="h-3 w-3" />
-                    </a>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+    <div className="min-w-0">
+      {/* Read-only info for published posts: imported note and per-network stats. */}
+      {post?.imported && (
+        <div className="mb-5 flex items-start gap-2.5 rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">
+          <ChannelIcon channel={post.imported.channel} className="mt-0.5" />
+          <p className="min-w-0 flex-1">
+            <span className="font-semibold">Posted directly on {CHANNEL_LABEL[post.imported.channel]}.</span>{" "}
+            <span className="text-muted-foreground">Pulled into your calendar when the account synced. Edit or delete it on {CHANNEL_LABEL[post.imported.channel]}.</span>
+          </p>
+        </div>
+      )}
+      {post && postStatChannels(post).length > 0 && (
+        <Section title="Performance">
+          <PostPerformance post={post} />
         </Section>
       )}
-
-      <Section title="Channels">
-        <div className="flex flex-wrap gap-2">
-          {CHANNELS.map((c) => {
-            const on = has(c);
-            return (
-              <button
-                key={c}
-                type="button"
-                aria-pressed={on}
-                onClick={() => toggleChannel(c)}
-                className={cn(
-                  "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
-                  on ? "border-primary bg-primary/5 font-semibold text-foreground" : "bg-card text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <ChannelIcon channel={c} />
-                {CHANNEL_LABEL[c]}
-              </button>
-            );
-          })}
-        </div>
-        {!locked && chs.some((c) => !connected.includes(c)) && (
-          <ul className="space-y-1">
-            {chs
-              .filter((c) => !connected.includes(c))
-              .map((c) => (
-                <li key={c} className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <ChannelIcon channel={c} className="h-3 w-3" />
-                  Connect {CHANNEL_LABEL[c]} to publish ·
-                  <a href="/settings" target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">
-                    Connect
-                  </a>
-                </li>
-              ))}
-          </ul>
-        )}
-        {msg("channels")}
-      </Section>
-
-      <Section title="Content">
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
-          <div className="space-y-1.5">
-            <Label htmlFor="mk-title">Title</Label>
-            <input id="mk-title" value={draft.title} maxLength={200} onChange={(e) => set({ title: e.target.value })} placeholder="Internal name" className={field()} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="mk-label">Campaign</Label>
-            <input id="mk-label" value={draft.label} maxLength={60} onChange={(e) => set({ label: e.target.value })} placeholder="e.g. Fall promo" className={field()} />
-          </div>
-        </div>
-
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between gap-2">
-            <Label htmlFor="mk-body">Text</Label>
-            {draft.channels.length > 1 && (
-              <span className="flex items-center gap-2 text-xs text-muted-foreground">
-                Customize per channel
-                <Switch checked={draft.custom_text} onChange={(v) => set({ custom_text: v })} label="Customize per channel" />
-              </span>
-            )}
-          </div>
-          <textarea id="mk-body" rows={6} value={draft.body} className={field("body")} onChange={(e) => set({ body: e.target.value })} placeholder="What do you want to share?" />
-          {!draft.custom_text && textCounters(chs)}
-          {msg("body")}
-        </div>
-
-        {draft.custom_text &&
-          chs.map((c) => {
-            const f = `${c}.text` as PostField;
-            return (
-              <div key={c} className="space-y-1.5">
-                <Label htmlFor={`mk-text-${c}`} className="flex items-center gap-1.5">
-                  <ChannelIcon channel={c} className="h-3.5 w-3.5" /> {CHANNEL_LABEL[c]} text
-                </Label>
-                <textarea
-                  id={`mk-text-${c}`}
-                  rows={4}
-                  value={draft[c].text}
-                  className={field(f)}
-                  onChange={(e) => setDraft((d) => ({ ...d, [c]: { ...d[c], text: e.target.value } }))}
-                  placeholder={draft.body || "Uses the main text"}
-                />
-                {textCounters([c])}
-                {msg(f)}
-              </div>
-            );
-          })}
-
-        {(has("facebook") || has("instagram") || has("linkedin") || has("x")) && (
-          <div className="space-y-1.5">
-            <Label htmlFor="mk-tags">
-              Hashtags{" "}
-              <span className="font-normal text-muted-foreground">
-                ·{" "}
-                {(["facebook", "instagram", "linkedin", "x"] as Channel[])
-                  .filter(has)
-                  .map((c) => CHANNEL_LABEL[c])
-                  .join(", ")}
-              </span>
-            </Label>
-            <div className={cn("flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border border-input bg-card px-2 py-1.5", bad("hashtags") && "border-destructive")}>
-              {draft.hashtags.map((t) => (
-                <span key={t} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">
-                  #{t}
-                  {!locked && (
-                    <button type="button" aria-label={`Remove #${t}`} onClick={() => set({ hashtags: draft.hashtags.filter((x) => x !== t) })} className="text-muted-foreground hover:text-foreground">
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
-                </span>
-              ))}
-              <input
-                id="mk-tags"
-                value={tagInput}
-                onChange={(e) => (/[\s,]$/.test(e.target.value) ? addTags(e.target.value) : setTagInput(e.target.value))}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addTags(tagInput);
-                  } else if (e.key === "Backspace" && !tagInput && draft.hashtags.length) set({ hashtags: draft.hashtags.slice(0, -1) });
-                }}
-                onBlur={() => addTags(tagInput)}
-                placeholder={draft.hashtags.length ? "" : "#austin #smallbusiness"}
-                className="h-6 min-w-[8rem] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              />
-            </div>
-            {msg("hashtags")}
-          </div>
+      <fieldset disabled={locked} className="min-w-0">
+        {post?.results && Object.keys(post.results).length > 0 && (
+          <Section title="Results">
+            <ul className="divide-y rounded-lg border">
+              {CHANNELS.filter((c) => post.channels.includes(c)).map((c) => {
+                const r = post.results?.[c];
+                const st = r?.status ?? "pending";
+                return (
+                  <li key={c} className="flex items-start gap-3 px-3 py-2.5 text-sm">
+                    <ChannelIcon channel={c} className="mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="flex flex-wrap items-center gap-x-2">
+                        <span className="font-semibold">{CHANNEL_LABEL[c]}</span>
+                        <span
+                          className={cn(
+                            "rounded-md px-1.5 py-0.5 text-[11px] font-semibold",
+                            st === "published" ? "bg-success/10 text-success" : st === "failed" ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning",
+                          )}
+                        >
+                          {st === "published" ? "Published" : st === "failed" ? "Failed" : "Pending"}
+                        </span>
+                        {r?.posted_at && <span className="text-xs text-muted-foreground">{format(parseISO(r.posted_at), "d MMM, h:mm a")}</span>}
+                      </p>
+                      {r?.error && <p className="text-xs text-destructive">{r.error}</p>}
+                    </div>
+                    {r?.permalink && (
+                      <a href={r.permalink} target="_blank" rel="noreferrer" className="inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-primary hover:underline">
+                        View on {CHANNEL_LABEL[c]} <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </Section>
         )}
 
-        <div className="space-y-1.5">
-          <Label htmlFor="mk-note">Internal note</Label>
-          <textarea id="mk-note" rows={2} value={draft.note} maxLength={2000} onChange={(e) => set({ note: e.target.value })} placeholder="Only your team sees this" className={field()} />
-        </div>
-      </Section>
-
-      <Section title="Media">
-        {draft.media.length > 0 && (
-          <ul className="divide-y rounded-lg border">
-            {draft.media.map((m, i) => (
-              <li key={`${m.url.slice(-40)}-${i}`} className="flex items-center gap-3 p-2">
-                <span className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md border bg-muted">
-                  {m.type === "image" ? (
-                    <img src={m.url} alt={m.alt ?? ""} className="h-full w-full object-cover" />
-                  ) : (
-                    <span className="flex h-full w-full items-center justify-center text-muted-foreground">
-                      <Link2 className="h-4 w-4" />
-                    </span>
-                  )}
-                  <span className="absolute left-0.5 top-0.5 rounded bg-background/90 px-1 text-[10px] font-semibold tabular-nums">{i + 1}</span>
-                </span>
-                <div className="min-w-0 flex-1 space-y-1">
-                  {m.type === "image" ? (
-                    <input
-                      value={m.alt ?? ""}
-                      aria-label={`Alt text for image ${i + 1}`}
-                      placeholder="Alt text"
-                      className={field(undefined, "h-8 py-1")}
-                      maxLength={1000}
-                      onChange={(e) => set({ media: draft.media.map((x, j) => (j === i ? { ...x, alt: e.target.value } : x)) })}
-                    />
-                  ) : (
-                    <p className="truncate text-sm">{m.url}</p>
-                  )}
-                  <p className="truncate text-[11px] text-muted-foreground">
-                    {m.type === "video"
-                      ? "Video link"
-                      : [m.width && m.height ? `${m.width}×${m.height}` : null, m.size ? fileSize(m.size) : null, m.name].filter(Boolean).join(" · ")}
-                  </p>
-                </div>
-                {!locked && (
-                  <div className="flex shrink-0 items-center">
-                    <button type="button" className={buttonClass("ghost", "icon", "h-8 w-8")} aria-label="Move up" disabled={i === 0} onClick={() => moveMedia(i, -1)}>
-                      <ArrowUp />
-                    </button>
-                    <button type="button" className={buttonClass("ghost", "icon", "h-8 w-8")} aria-label="Move down" disabled={i === draft.media.length - 1} onClick={() => moveMedia(i, 1)}>
-                      <ArrowDown />
-                    </button>
-                    <button type="button" className={buttonClass("ghost", "icon", "h-8 w-8")} aria-label="Remove" onClick={() => set({ media: draft.media.filter((_, j) => j !== i) })}>
-                      <X />
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        {!locked && (
-          <>
-            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={(e) => onFiles(e.target.files)} />
-            <button
-              type="button"
-              disabled={uploading}
-              onClick={() => fileRef.current?.click()}
-              onDragOver={(e) => {
-                e.preventDefault();
-                setDragOver(true);
-              }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOver(false);
-                void onFiles(e.dataTransfer.files);
-              }}
-              className={cn(
-                "flex w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-6 text-center transition-colors hover:border-primary/50 hover:bg-muted/40",
-                dragOver && "border-primary bg-accent",
-              )}
-            >
-              {uploading ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /> : dragOver ? <Upload className="h-5 w-5 text-primary" /> : <ImagePlus className="h-5 w-5 text-muted-foreground" />}
-              <span className="text-sm font-semibold">{uploading ? "Adding images…" : dragOver ? "Drop to add" : "Drag images here or click to upload"}</span>
-              <span className="text-xs text-muted-foreground">
-                JPG, PNG or WebP · up to {MAX_UPLOAD_MB} MB · {MAX_MEDIA - draft.media.length} of {MAX_MEDIA} left
-              </span>
-            </button>
-            <div className="flex min-w-0 gap-2">
-              <input
-                value={videoUrl}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addVideo();
-                  }
-                }}
-                placeholder="Video link (.mp4, YouTube…)"
-                className={field(undefined, "h-8 min-w-0 py-1")}
-                aria-label="Video link"
-              />
-              <button type="button" className={buttonClass("outline", "sm")} onClick={addVideo}>
-                Add
-              </button>
-            </div>
-          </>
-        )}
-        {msg("media")}
-      </Section>
-
-      {has("google") && (
-        <Section title="Google" icon={<ChannelIcon channel="google" className="h-3.5 w-3.5" />}>
-          {locations.length > 1 && (
-            <div className="space-y-1.5">
-              <Label>Locations</Label>
-              <div className="relative max-w-xs">
+        <Section title="Channels">
+          <div className="flex flex-wrap gap-2">
+            {CHANNELS.map((c) => {
+              const on = has(c);
+              return (
                 <button
+                  key={c}
                   type="button"
-                  aria-expanded={locOpen}
-                  onClick={() => setLocOpen((o) => !o)}
+                  aria-pressed={on}
+                  onClick={() => toggleChannel(c)}
                   className={cn(
-                    "flex h-9 w-full items-center gap-2 rounded-lg border border-input bg-card px-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    bad("google.locations") && "border-destructive",
+                    "inline-flex h-9 items-center gap-2 rounded-full border px-3 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60",
+                    on ? "border-primary bg-primary/5 font-semibold text-foreground" : "bg-card text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">
-                    {!pickedLocs.length
-                      ? `All locations (${locations.length})`
-                      : pickedLocs.length === 1
-                        ? locations.find((l) => l.id === pickedLocs[0])?.title
-                        : `${pickedLocs.length} of ${locations.length} locations`}
-                  </span>
-                  <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                  <ChannelIcon channel={c} />
+                  {CHANNEL_LABEL[c]}
                 </button>
-                {locOpen && (
-                  <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-xl border bg-popover p-1 shadow-elegant">
-                    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-sm font-semibold hover:bg-muted/50">
-                      <input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={!pickedLocs.length} onChange={() => setG({ locations: [] })} />
-                      All locations
-                    </label>
-                    <div className="my-1 h-px bg-border" />
-                    {locations.map((l) => (
-                      <label key={l.id} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-sm hover:bg-muted/50">
-                        <input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={isLocOn(l.id)} onChange={() => toggleLocation(l.id)} />
-                        <span className="truncate">{l.title}</span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {msg("google.locations")}
-            </div>
+              );
+            })}
+          </div>
+          {!locked && chs.some((c) => !connected.includes(c)) && (
+            <ul className="space-y-1">
+              {chs
+                .filter((c) => !connected.includes(c))
+                .map((c) => (
+                  <li key={c} className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <ChannelIcon channel={c} className="h-3 w-3" />
+                    Connect {CHANNEL_LABEL[c]} to publish ·
+                    <a href="/settings" target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">
+                      Connect
+                    </a>
+                  </li>
+                ))}
+            </ul>
           )}
-          <div className="space-y-1.5">
-            <Label>Post type</Label>
-            <Segmented
-              label="Google post type"
-              value={draft.google.type}
-              onChange={(v) => setG({ type: v as GooglePostType })}
-              options={(["update", "event", "offer"] as GooglePostType[]).map((t) => ({ value: t, label: GOOGLE_TYPE_LABEL[t] }))}
-            />
+          {msg("channels")}
+        </Section>
+
+        <Section title="Content">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_200px]">
+            <div className="space-y-1.5">
+              <Label htmlFor="mk-title">Title</Label>
+              <input id="mk-title" value={draft.title} maxLength={200} onChange={(e) => set({ title: e.target.value })} placeholder="Internal name" className={field()} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="mk-label">Campaign</Label>
+              <input id="mk-label" value={draft.label} maxLength={60} onChange={(e) => set({ label: e.target.value })} placeholder="e.g. Fall promo" className={field()} />
+            </div>
           </div>
 
-          {draft.google.type === "event" && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="mk-ev-title" className="flex justify-between">
-                  Event title{" "}
-                  <span className="text-xs font-normal text-muted-foreground">
-                    <Counter value={draft.google.event.title.length} max={58} />
-                  </span>
-                </Label>
-                <input id="mk-ev-title" value={draft.google.event.title} className={field("google.event.title")} onChange={(e) => setG({ event: { ...draft.google.event, title: e.target.value } })} />
-                {msg("google.event.title")}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mk-ev-start">Starts</Label>
-                <DateTimeField
-                  id="mk-ev-start"
-                  value={draft.google.event.start}
-                  invalid={bad("google.event.start")}
-                  defaultTime="10:00"
-                  onChange={(v) => setG({ event: { ...draft.google.event, start: v, end: draft.google.event.end || v } })}
-                />
-                {msg("google.event.start")}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mk-ev-end">Ends</Label>
-                <DateTimeField
-                  id="mk-ev-end"
-                  value={draft.google.event.end}
-                  min={draft.google.event.start ? new Date(draft.google.event.start) : null}
-                  invalid={bad("google.event.end")}
-                  defaultTime="14:00"
-                  onChange={(v) => setG({ event: { ...draft.google.event, end: v } })}
-                />
-                {msg("google.event.end")}
-              </div>
-            </div>
-          )}
-
-          {draft.google.type === "offer" && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="mk-of-title" className="flex justify-between">
-                  Offer title{" "}
-                  <span className="text-xs font-normal text-muted-foreground">
-                    <Counter value={draft.google.offer.title.length} max={58} />
-                  </span>
-                </Label>
-                <input
-                  id="mk-of-title"
-                  value={draft.google.offer.title}
-                  className={field("google.offer.title")}
-                  onChange={(e) => setG({ offer: { ...draft.google.offer, title: e.target.value } })}
-                  placeholder="e.g. 20% off your first visit"
-                />
-                {msg("google.offer.title")}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mk-of-start">Starts</Label>
-                <DateField id="mk-of-start" value={draft.google.offer.start} invalid={bad("google.offer.start")} onChange={(v) => setG({ offer: { ...draft.google.offer, start: v } })} />
-                {msg("google.offer.start")}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mk-of-end">Ends</Label>
-                <DateField
-                  id="mk-of-end"
-                  value={draft.google.offer.end}
-                  min={draft.google.offer.start || undefined}
-                  invalid={bad("google.offer.end")}
-                  onChange={(v) => setG({ offer: { ...draft.google.offer, end: v } })}
-                />
-                {msg("google.offer.end")}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mk-coupon">Coupon code</Label>
-                <input id="mk-coupon" value={draft.google.offer.coupon} maxLength={58} className={field()} onChange={(e) => setG({ offer: { ...draft.google.offer, coupon: e.target.value } })} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="mk-redeem">Redeem link</Label>
-                <input
-                  id="mk-redeem"
-                  value={draft.google.offer.url}
-                  className={field("google.offer.url")}
-                  onChange={(e) => setG({ offer: { ...draft.google.offer, url: e.target.value } })}
-                  placeholder="https://"
-                />
-                {msg("google.offer.url")}
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="mk-terms">Terms</Label>
-                <textarea id="mk-terms" rows={2} value={draft.google.offer.terms} maxLength={5000} className={field()} onChange={(e) => setG({ offer: { ...draft.google.offer, terms: e.target.value } })} />
-              </div>
-            </div>
-          )}
-
-          {draft.google.type !== "offer" && (
-            <div className="grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
-              <div className="space-y-1.5">
-                <Label htmlFor="mk-cta">Button</Label>
-                <select id="mk-cta" value={draft.google.cta.type} className={field()} onChange={(e) => setG({ cta: { ...draft.google.cta, type: e.target.value as CtaType } })}>
-                  {(Object.keys(CTA_LABEL) as CtaType[]).map((k) => (
-                    <option key={k} value={k}>
-                      {CTA_LABEL[k]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {draft.google.cta.type !== "none" && draft.google.cta.type !== "CALL" && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="mk-cta-url">Button link</Label>
-                  <input id="mk-cta-url" value={draft.google.cta.url} className={field("google.cta.url")} onChange={(e) => setG({ cta: { ...draft.google.cta, url: e.target.value } })} placeholder="https://" />
-                  {msg("google.cta.url")}
-                </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="mk-body">Text</Label>
+              {draft.channels.length > 1 && (
+                <span className="flex items-center gap-2 text-xs text-muted-foreground">
+                  Customize per channel
+                  <Switch checked={draft.custom_text} onChange={(v) => set({ custom_text: v })} label="Customize per channel" />
+                </span>
               )}
             </div>
-          )}
-        </Section>
-      )}
-
-      {has("facebook") && (
-        <Section title="Facebook" icon={<ChannelIcon channel="facebook" className="h-3.5 w-3.5" />}>
-          <div className="space-y-1.5">
-            <Label htmlFor="mk-fb-link">Link</Label>
-            <input id="mk-fb-link" value={draft.facebook.link} className={field("facebook.link")} onChange={(e) => setFb({ link: e.target.value })} placeholder="https://" />
-            {msg("facebook.link")}
+            <textarea id="mk-body" rows={6} value={draft.body} className={field("body")} onChange={(e) => set({ body: e.target.value })} placeholder="What do you want to share?" />
+            {!draft.custom_text && textCounters(chs)}
+            {msg("body")}
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="mk-fb-comment">First comment</Label>
-            <textarea id="mk-fb-comment" rows={2} value={draft.facebook.first_comment} className={field("facebook.first_comment")} onChange={(e) => setFb({ first_comment: e.target.value })} />
-            {msg("facebook.first_comment")}
-          </div>
-        </Section>
-      )}
 
-      {has("instagram") && (
-        <Section title="Instagram" icon={<ChannelIcon channel="instagram" className="h-3.5 w-3.5" />}>
-          <div className="space-y-1.5">
-            <Label htmlFor="mk-ig-comment" className="flex justify-between">
-              First comment
-              <span className="text-xs font-normal text-muted-foreground">
-                <Counter value={hashtagsIn(draft.instagram.first_comment).length} max={30} suffix=" #" />
-              </span>
-            </Label>
-            <textarea id="mk-ig-comment" rows={2} value={draft.instagram.first_comment} className={field("instagram.first_comment")} onChange={(e) => setIg({ first_comment: e.target.value })} placeholder="#hashtags" />
-            {msg("instagram.first_comment")}
-          </div>
-        </Section>
-      )}
-
-      {!locked && (
-        <Section title="When">
-          <Segmented
-            label="When"
-            value={mode}
-            onChange={setMode}
-            options={[
-              { value: "now", label: "Publish now" },
-              { value: "schedule", label: "Schedule" },
-              { value: "draft", label: "Save as draft" },
-            ]}
-          />
-          {mode !== "now" && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="w-full max-w-sm space-y-1.5">
-                  <Label htmlFor="mk-when">{mode === "schedule" ? "Date and time" : "Calendar date (optional)"}</Label>
-                  <DateTimeField id="mk-when" value={when} min={mode === "schedule" ? new Date() : null} invalid={bad("scheduled_at")} clearable={mode === "draft"} onChange={setWhen} />
+          {draft.custom_text &&
+            chs.map((c) => {
+              const f = `${c}.text` as PostField;
+              return (
+                <div key={c} className="space-y-1.5">
+                  <Label htmlFor={`mk-text-${c}`} className="flex items-center gap-1.5">
+                    <ChannelIcon channel={c} className="h-3.5 w-3.5" /> {CHANNEL_LABEL[c]} text
+                  </Label>
+                  <textarea
+                    id={`mk-text-${c}`}
+                    rows={4}
+                    value={draft[c].text}
+                    className={field(f)}
+                    onChange={(e) => setDraft((d) => ({ ...d, [c]: { ...d[c], text: e.target.value } }))}
+                    placeholder={draft.body || "Uses the main text"}
+                  />
+                  {textCounters([c])}
+                  {msg(f)}
                 </div>
-                {mode === "schedule" && (
-                  <div className="flex gap-1.5">
-                    <button type="button" className={buttonClass("outline", "sm")} onClick={() => setWhen(isoToLocal(quickPickTime("tomorrow").toISOString()))}>
-                      Tomorrow 9am
-                    </button>
-                    <button type="button" className={buttonClass("outline", "sm")} onClick={() => setWhen(isoToLocal(quickPickTime("next_monday").toISOString()))}>
-                      Next Mon 9am
-                    </button>
+              );
+            })}
+
+          {(has("facebook") || has("instagram") || has("linkedin") || has("x")) && (
+            <div className="space-y-1.5">
+              <Label htmlFor="mk-tags">
+                Hashtags{" "}
+                <span className="font-normal text-muted-foreground">
+                  ·{" "}
+                  {(["facebook", "instagram", "linkedin", "x"] as Channel[])
+                    .filter(has)
+                    .map((c) => CHANNEL_LABEL[c])
+                    .join(", ")}
+                </span>
+              </Label>
+              <div className={cn("flex min-h-9 flex-wrap items-center gap-1.5 rounded-lg border border-input bg-card px-2 py-1.5", bad("hashtags") && "border-destructive")}>
+                {draft.hashtags.map((t) => (
+                  <span key={t} className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs">
+                    #{t}
+                    {!locked && (
+                      <button
+                        type="button"
+                        aria-label={`Remove #${t}`}
+                        onClick={() => set({ hashtags: draft.hashtags.filter((x) => x !== t) })}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+                <input
+                  id="mk-tags"
+                  value={tagInput}
+                  onChange={(e) => (/[\s,]$/.test(e.target.value) ? addTags(e.target.value) : setTagInput(e.target.value))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addTags(tagInput);
+                    } else if (e.key === "Backspace" && !tagInput && draft.hashtags.length) set({ hashtags: draft.hashtags.slice(0, -1) });
+                  }}
+                  onBlur={() => addTags(tagInput)}
+                  placeholder={draft.hashtags.length ? "" : "#austin #smallbusiness"}
+                  className="h-6 min-w-[8rem] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+              {msg("hashtags")}
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="mk-note">Internal note</Label>
+            <textarea id="mk-note" rows={2} value={draft.note} maxLength={2000} onChange={(e) => set({ note: e.target.value })} placeholder="Only your team sees this" className={field()} />
+          </div>
+        </Section>
+
+        <Section title="Media">
+          {draft.media.length > 0 && (
+            <ul className="divide-y rounded-lg border">
+              {draft.media.map((m, i) => (
+                <li key={`${m.url.slice(-40)}-${i}`} className="flex items-center gap-3 p-2">
+                  <span className="relative h-14 w-14 shrink-0 overflow-hidden rounded-md border bg-muted">
+                    {m.type === "image" ? (
+                      <img referrerPolicy="no-referrer" src={m.url} alt={m.alt ?? ""} className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center text-muted-foreground">
+                        <Link2 className="h-4 w-4" />
+                      </span>
+                    )}
+                    <span className="absolute left-0.5 top-0.5 rounded bg-background/90 px-1 text-[10px] font-semibold tabular-nums">{i + 1}</span>
+                  </span>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    {m.type === "image" ? (
+                      <input
+                        value={m.alt ?? ""}
+                        aria-label={`Alt text for image ${i + 1}`}
+                        placeholder="Alt text"
+                        className={field(undefined, "h-8 py-1")}
+                        maxLength={1000}
+                        onChange={(e) => set({ media: draft.media.map((x, j) => (j === i ? { ...x, alt: e.target.value } : x)) })}
+                      />
+                    ) : (
+                      <p className="truncate text-sm">{m.url}</p>
+                    )}
+                    <p className="truncate text-[11px] text-muted-foreground">
+                      {m.type === "video" ? "Video link" : [m.width && m.height ? `${m.width}×${m.height}` : null, m.size ? fileSize(m.size) : null, m.name].filter(Boolean).join(" · ")}
+                    </p>
+                  </div>
+                  {!locked && (
+                    <div className="flex shrink-0 items-center">
+                      <button type="button" className={buttonClass("ghost", "icon", "h-8 w-8")} aria-label="Move up" disabled={i === 0} onClick={() => moveMedia(i, -1)}>
+                        <ArrowUp />
+                      </button>
+                      <button type="button" className={buttonClass("ghost", "icon", "h-8 w-8")} aria-label="Move down" disabled={i === draft.media.length - 1} onClick={() => moveMedia(i, 1)}>
+                        <ArrowDown />
+                      </button>
+                      <button type="button" className={buttonClass("ghost", "icon", "h-8 w-8")} aria-label="Remove" onClick={() => set({ media: draft.media.filter((_, j) => j !== i) })}>
+                        <X />
+                      </button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          {!locked && (
+            <>
+              <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={(e) => onFiles(e.target.files)} />
+              <button
+                type="button"
+                disabled={uploading}
+                onClick={() => fileRef.current?.click()}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  void onFiles(e.dataTransfer.files);
+                }}
+                className={cn(
+                  "flex w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed px-4 py-6 text-center transition-colors hover:border-primary/50 hover:bg-muted/40",
+                  dragOver && "border-primary bg-accent",
+                )}
+              >
+                {uploading ? (
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                ) : dragOver ? (
+                  <Upload className="h-5 w-5 text-primary" />
+                ) : (
+                  <ImagePlus className="h-5 w-5 text-muted-foreground" />
+                )}
+                <span className="text-sm font-semibold">{uploading ? "Adding images…" : dragOver ? "Drop to add" : "Drag images here or click to upload"}</span>
+                <span className="text-xs text-muted-foreground">
+                  JPG, PNG or WebP · up to {MAX_UPLOAD_MB} MB · {MAX_MEDIA - draft.media.length} of {MAX_MEDIA} left
+                </span>
+              </button>
+              <div className="flex min-w-0 gap-2">
+                <input
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addVideo();
+                    }
+                  }}
+                  placeholder="Video link (.mp4, YouTube…)"
+                  className={field(undefined, "h-8 min-w-0 py-1")}
+                  aria-label="Video link"
+                />
+                <button type="button" className={buttonClass("outline", "sm")} onClick={addVideo}>
+                  Add
+                </button>
+              </div>
+            </>
+          )}
+          {msg("media")}
+        </Section>
+
+        {has("google") && (
+          <Section title="Google" icon={<ChannelIcon channel="google" className="h-3.5 w-3.5" />}>
+            {locations.length > 1 && (
+              <div className="space-y-1.5">
+                <Label>Locations</Label>
+                <div className="relative max-w-xs">
+                  <button
+                    type="button"
+                    aria-expanded={locOpen}
+                    onClick={() => setLocOpen((o) => !o)}
+                    className={cn(
+                      "flex h-9 w-full items-center gap-2 rounded-lg border border-input bg-card px-3 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      bad("google.locations") && "border-destructive",
+                    )}
+                  >
+                    <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate">
+                      {!pickedLocs.length
+                        ? `All locations (${locations.length})`
+                        : pickedLocs.length === 1
+                          ? locations.find((l) => l.id === pickedLocs[0])?.title
+                          : `${pickedLocs.length} of ${locations.length} locations`}
+                    </span>
+                    <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+                  </button>
+                  {locOpen && (
+                    <div className="absolute left-0 top-full z-20 mt-1 w-72 rounded-xl border bg-popover p-1 shadow-elegant">
+                      <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-sm font-semibold hover:bg-muted/50">
+                        <input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={!pickedLocs.length} onChange={() => setG({ locations: [] })} />
+                        All locations
+                      </label>
+                      <div className="my-1 h-px bg-border" />
+                      {locations.map((l) => (
+                        <label key={l.id} className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-2 text-sm hover:bg-muted/50">
+                          <input type="checkbox" className="h-4 w-4 accent-[hsl(var(--primary))]" checked={isLocOn(l.id)} onChange={() => toggleLocation(l.id)} />
+                          <span className="truncate">{l.title}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {msg("google.locations")}
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <Label>Post type</Label>
+              <Segmented
+                label="Google post type"
+                value={draft.google.type}
+                onChange={(v) => setG({ type: v as GooglePostType })}
+                options={(["update", "event", "offer"] as GooglePostType[]).map((t) => ({ value: t, label: GOOGLE_TYPE_LABEL[t] }))}
+              />
+            </div>
+
+            {draft.google.type === "event" && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="mk-ev-title" className="flex justify-between">
+                    Event title{" "}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      <Counter value={draft.google.event.title.length} max={58} />
+                    </span>
+                  </Label>
+                  <input
+                    id="mk-ev-title"
+                    value={draft.google.event.title}
+                    className={field("google.event.title")}
+                    onChange={(e) => setG({ event: { ...draft.google.event, title: e.target.value } })}
+                  />
+                  {msg("google.event.title")}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mk-ev-start">Starts</Label>
+                  <DateTimeField
+                    id="mk-ev-start"
+                    value={draft.google.event.start}
+                    invalid={bad("google.event.start")}
+                    defaultTime="10:00"
+                    onChange={(v) => setG({ event: { ...draft.google.event, start: v, end: draft.google.event.end || v } })}
+                  />
+                  {msg("google.event.start")}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mk-ev-end">Ends</Label>
+                  <DateTimeField
+                    id="mk-ev-end"
+                    value={draft.google.event.end}
+                    min={draft.google.event.start ? new Date(draft.google.event.start) : null}
+                    invalid={bad("google.event.end")}
+                    defaultTime="14:00"
+                    onChange={(v) => setG({ event: { ...draft.google.event, end: v } })}
+                  />
+                  {msg("google.event.end")}
+                </div>
+              </div>
+            )}
+
+            {draft.google.type === "offer" && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="mk-of-title" className="flex justify-between">
+                    Offer title{" "}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      <Counter value={draft.google.offer.title.length} max={58} />
+                    </span>
+                  </Label>
+                  <input
+                    id="mk-of-title"
+                    value={draft.google.offer.title}
+                    className={field("google.offer.title")}
+                    onChange={(e) => setG({ offer: { ...draft.google.offer, title: e.target.value } })}
+                    placeholder="e.g. 20% off your first visit"
+                  />
+                  {msg("google.offer.title")}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mk-of-start">Starts</Label>
+                  <DateField id="mk-of-start" value={draft.google.offer.start} invalid={bad("google.offer.start")} onChange={(v) => setG({ offer: { ...draft.google.offer, start: v } })} />
+                  {msg("google.offer.start")}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mk-of-end">Ends</Label>
+                  <DateField
+                    id="mk-of-end"
+                    value={draft.google.offer.end}
+                    min={draft.google.offer.start || undefined}
+                    invalid={bad("google.offer.end")}
+                    onChange={(v) => setG({ offer: { ...draft.google.offer, end: v } })}
+                  />
+                  {msg("google.offer.end")}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mk-coupon">Coupon code</Label>
+                  <input id="mk-coupon" value={draft.google.offer.coupon} maxLength={58} className={field()} onChange={(e) => setG({ offer: { ...draft.google.offer, coupon: e.target.value } })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="mk-redeem">Redeem link</Label>
+                  <input
+                    id="mk-redeem"
+                    value={draft.google.offer.url}
+                    className={field("google.offer.url")}
+                    onChange={(e) => setG({ offer: { ...draft.google.offer, url: e.target.value } })}
+                    placeholder="https://"
+                  />
+                  {msg("google.offer.url")}
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label htmlFor="mk-terms">Terms</Label>
+                  <textarea
+                    id="mk-terms"
+                    rows={2}
+                    value={draft.google.offer.terms}
+                    maxLength={5000}
+                    className={field()}
+                    onChange={(e) => setG({ offer: { ...draft.google.offer, terms: e.target.value } })}
+                  />
+                </div>
+              </div>
+            )}
+
+            {draft.google.type !== "offer" && (
+              <div className="grid gap-3 sm:grid-cols-[180px_minmax(0,1fr)]">
+                <div className="space-y-1.5">
+                  <Label htmlFor="mk-cta">Button</Label>
+                  <select id="mk-cta" value={draft.google.cta.type} className={field()} onChange={(e) => setG({ cta: { ...draft.google.cta, type: e.target.value as CtaType } })}>
+                    {(Object.keys(CTA_LABEL) as CtaType[]).map((k) => (
+                      <option key={k} value={k}>
+                        {CTA_LABEL[k]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {draft.google.cta.type !== "none" && draft.google.cta.type !== "CALL" && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="mk-cta-url">Button link</Label>
+                    <input
+                      id="mk-cta-url"
+                      value={draft.google.cta.url}
+                      className={field("google.cta.url")}
+                      onChange={(e) => setG({ cta: { ...draft.google.cta, url: e.target.value } })}
+                      placeholder="https://"
+                    />
+                    {msg("google.cta.url")}
                   </div>
                 )}
               </div>
-              {mode === "schedule" && tz && <p className="text-xs text-muted-foreground">{tz.replace(/_/g, " ")}</p>}
-              {msg("scheduled_at")}
+            )}
+          </Section>
+        )}
+
+        {has("facebook") && (
+          <Section title="Facebook" icon={<ChannelIcon channel="facebook" className="h-3.5 w-3.5" />}>
+            <div className="space-y-1.5">
+              <Label htmlFor="mk-fb-link">Link</Label>
+              <input id="mk-fb-link" value={draft.facebook.link} className={field("facebook.link")} onChange={(e) => setFb({ link: e.target.value })} placeholder="https://" />
+              {msg("facebook.link")}
             </div>
-          )}
-          {post?.status === "scheduled" && (
-            <button type="button" className={buttonClass("outline", "sm")} onClick={unschedule} disabled={!!busy}>
-              {busy === "unschedule" && <Loader2 className="animate-spin" />}
-              Unschedule
-            </button>
-          )}
-          {attempted && errors.length > 0 && (
-            <div ref={summaryRef}>
-              <ErrorSummary issues={errors} />
+            <div className="space-y-1.5">
+              <Label htmlFor="mk-fb-comment">First comment</Label>
+              <textarea id="mk-fb-comment" rows={2} value={draft.facebook.first_comment} className={field("facebook.first_comment")} onChange={(e) => setFb({ first_comment: e.target.value })} />
+              {msg("facebook.first_comment")}
             </div>
-          )}
-        </Section>
-      )}
-    </fieldset>
+          </Section>
+        )}
+
+        {has("instagram") && (
+          <Section title="Instagram" icon={<ChannelIcon channel="instagram" className="h-3.5 w-3.5" />}>
+            <div className="space-y-1.5">
+              <Label htmlFor="mk-ig-comment" className="flex justify-between">
+                First comment
+                <span className="text-xs font-normal text-muted-foreground">
+                  <Counter value={hashtagsIn(draft.instagram.first_comment).length} max={30} suffix=" #" />
+                </span>
+              </Label>
+              <textarea
+                id="mk-ig-comment"
+                rows={2}
+                value={draft.instagram.first_comment}
+                className={field("instagram.first_comment")}
+                onChange={(e) => setIg({ first_comment: e.target.value })}
+                placeholder="#hashtags"
+              />
+              {msg("instagram.first_comment")}
+            </div>
+          </Section>
+        )}
+
+        {!locked && (
+          <Section title="When">
+            <Segmented
+              label="When"
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: "now", label: "Publish now" },
+                { value: "schedule", label: "Schedule" },
+                { value: "draft", label: "Save as draft" },
+              ]}
+            />
+            {mode !== "now" && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="w-full max-w-sm space-y-1.5">
+                    <Label htmlFor="mk-when">{mode === "schedule" ? "Date and time" : "Calendar date (optional)"}</Label>
+                    <DateTimeField id="mk-when" value={when} min={mode === "schedule" ? new Date() : null} invalid={bad("scheduled_at")} clearable={mode === "draft"} onChange={setWhen} />
+                  </div>
+                  {mode === "schedule" && (
+                    <div className="flex gap-1.5">
+                      <button type="button" className={buttonClass("outline", "sm")} onClick={() => setWhen(isoToLocal(quickPickTime("tomorrow").toISOString()))}>
+                        Tomorrow 9am
+                      </button>
+                      <button type="button" className={buttonClass("outline", "sm")} onClick={() => setWhen(isoToLocal(quickPickTime("next_monday").toISOString()))}>
+                        Next Mon 9am
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {mode === "schedule" && tz && <p className="text-xs text-muted-foreground">{tz.replace(/_/g, " ")}</p>}
+                {msg("scheduled_at")}
+              </div>
+            )}
+            {post?.status === "scheduled" && (
+              <button type="button" className={buttonClass("outline", "sm")} onClick={unschedule} disabled={!!busy}>
+                {busy === "unschedule" && <Loader2 className="animate-spin" />}
+                Unschedule
+              </button>
+            )}
+            {attempted && errors.length > 0 && (
+              <div ref={summaryRef}>
+                <ErrorSummary issues={errors} />
+              </div>
+            )}
+          </Section>
+        )}
+      </fieldset>
+    </div>
   );
 
   const previewPane = (
@@ -1017,6 +1087,7 @@ export function PostComposer({
         title={
           <>
             <span className="truncate">{post ? (locked ? post.title || "Post" : "Edit post") : "New post"}</span>
+            {post?.imported && <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">Imported</span>}
             {post && <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold", POST_STATUS[post.status].tone)}>{POST_STATUS[post.status].label}</span>}
           </>
         }

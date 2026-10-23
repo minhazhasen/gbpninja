@@ -57,7 +57,30 @@ export interface ChannelResult {
   posted_at?: string | null;
   permalink?: string | null;
   error?: string | null;
+  /** The network's ids for what was posted (Google: one local post per location, "accounts/…/localPosts/…"). */
+  external_ids?: string[] | null;
 }
+
+/** Engagement a network reports for one post. Missing = the network doesn't report it. */
+export interface PostStats {
+  views?: number | null;
+  reach?: number | null;
+  clicks?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;
+  saves?: number | null;
+  fetched_at: string;
+}
+export const POST_STAT_LABEL: Record<Exclude<keyof PostStats, "fetched_at">, string> = {
+  views: "Views",
+  reach: "Reach",
+  clicks: "Clicks",
+  likes: "Likes",
+  comments: "Comments",
+  shares: "Shares",
+  saves: "Saves",
+};
 
 /** Google event / offer times are the business's wall clock (`yyyy-MM-ddTHH:mm` / `yyyy-MM-dd`). */
 export interface GoogleEvent {
@@ -126,6 +149,10 @@ export interface Post extends PostDraft {
   id: string;
   status: PostStatus;
   results?: Partial<Record<Channel, ChannelResult>> | null;
+  /** Posted outside this app and pulled in from the network (read-only here). */
+  imported?: { channel: Channel; external_id: string } | null;
+  /** Per-channel engagement, refreshed when the network is synced. Google doesn't report per-post stats. */
+  stats?: Partial<Record<Channel, PostStats>> | null;
   published_at?: string | null;
   created_at: string;
   updated_at?: string;
@@ -470,3 +497,20 @@ export const monthGrid = (anchor: Date) => {
   const start = addDays(first, -((first.getDay() + 6) % 7));
   return Array.from({ length: 42 }, (_, i) => addDays(start, i));
 };
+
+/** Totals across channels for lists: views (or reach) and engagements (likes + comments + shares + saves + clicks). Null without stats. */
+export function postEngagement(p: Pick<Post, "stats">) {
+  const all = Object.values(p.stats ?? {}).filter(Boolean) as PostStats[];
+  if (!all.length) return null;
+  const sum = (f: (s: PostStats) => number | null | undefined) => all.reduce((a, s) => a + (f(s) ?? 0), 0);
+  return {
+    views: sum((s) => s.views ?? s.reach),
+    engagements: sum((s) => (s.likes ?? 0) + (s.comments ?? 0) + (s.shares ?? 0) + (s.saves ?? 0) + (s.clicks ?? 0)),
+  };
+}
+
+/** Networks whose API reports per-post stats. Google doesn't (its post views are only in its own dashboard). */
+export const STATS_CHANNELS: Channel[] = ["facebook", "instagram", "linkedin", "x"];
+/** Published channels of a post that can show stats. */
+export const postStatChannels = (p: Pick<Post, "channels" | "results">) =>
+  CHANNELS.filter((c) => STATS_CHANNELS.includes(c) && p.channels.includes(c) && p.results?.[c]?.status === "published");

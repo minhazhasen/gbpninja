@@ -47,6 +47,7 @@ Don't press *Run NPM Install* — the archive already contains the `node_modules
 | Name | Value |
 |---|---|
 | `NODE_ENV` | `production` |
+| `NODE_OPTIONS` | `--v8-pool-size=2 --max-old-space-size=384` — fewer threads (~9) and a memory cap, so the app can't crowd out PHP |
 | `DATABASE_URL` | `file:/home/minhazho/gbpninja-data/app.db` — outside the upload folder, so deploys never touch it |
 | `SESSION_SECRET` | a new random value: `openssl rand -base64 32` (don't reuse the local one) |
 | `GOOGLE_CLIENT_ID` | the OAuth client ID |
@@ -55,6 +56,9 @@ Don't press *Run NPM Install* — the archive already contains the `node_modules
 | `GBP_DATA_SOURCE` | `mock` until the Google provider is implemented |
 | `PLATFORM_ADMIN_EMAILS` | your sign-in email(s), comma-separated |
 | `CRON_SECRET` | a random value; daily cron: `curl -H "Authorization: Bearer <CRON_SECRET>" https://app.gbpninja.com/api/cron/refresh-competitors` |
+| `META_APP_ID`, `META_APP_SECRET`, `META_LOGIN_CONFIG_ID` | the Meta app (Facebook Page + Instagram publishing) |
+| `META_REDIRECT_URI` | `https://app.gbpninja.com/api/oauth/meta/callback` (listed in the Meta app's Valid OAuth Redirect URIs) |
+| `APP_URL` | `https://app.gbpninja.com` — Instagram fetches post images from `APP_URL/api/media/…` (files in `~/gbpninja-data/media`) |
 | `NEXT_PUBLIC_FIREBASE_*` | same 6 values as the GitHub variables (server code reads the project id) |
 
 Save → *Restart*. The app creates its database tables on start (`src/instrumentation-node.ts` runs `prisma/schema.sql`).
@@ -72,5 +76,6 @@ Save → *Restart*. The app creates its database tables on start (`src/instrumen
   every site) and the loader sets `UV_THREADPOOL_SIZE=2`; it runs on ~12 threads. Watch cPanel → Resource Usage after changes.
 - **Schema changes:** edit `prisma/schema.prisma`, run `npm run db:sql` (and `npm run db:push` locally). New tables/indexes are created on the
   next start; changing existing columns needs a manual migration.
+- **Health:** `https://app.gbpninja.com/api/health` shows the app's threads and memory (expect ~9 threads, ~200 MB).
 - **Smoke test:** `https://app.gbpninja.com/privacy` (public) loads, `/dashboard` redirects to `/login`, sign-in works, Settings → connect Gmail.
 - **Logs:** cPanel → Setup Node.js App → the app's `stderr.log` in the app root.

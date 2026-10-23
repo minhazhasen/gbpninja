@@ -64,3 +64,11 @@ model GoogleToken {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }
+
+// The workspace's own data (tasks, templates, team, review requests, competitors, posts, connections, platform admin…) as JSON
+// documents, one per key (src/lib/gbp/persist.ts). Google data is fetched live and only cached here.
+model AppState {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

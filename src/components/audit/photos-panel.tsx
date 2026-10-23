@@ -5,7 +5,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, ImagePlus, Loader2, Trash2, Upload } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, ImagePlus, Loader2, Trash2, Upload } from "lucide-react";
 import { buttonClass } from "@/components/ui";
 import { Modal, Segmented, SelectBox, useConfirm } from "@/components/ui-client";
 import { deletePhoto, updatePhoto, uploadPhotos } from "@/app/(app)/actions";
@@ -38,6 +38,8 @@ async function prepare(file: File, category: PhotoCategory): Promise<Prepared | 
 }
 
 const sizeHint = (p: Photo) => (p.width && p.height ? `${p.width} × ${p.height}` : "");
+/** 12400 → "12.4K". Only for views Google reported. */
+const views = (n: number) => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 const dateLabel = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
 export function PhotosPanel({ location }: { location: Location }) {
@@ -55,10 +57,14 @@ export function PhotosPanel({ location }: { location: Location }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [viewIndex, setViewIndex] = useState<number | null>(null);
+  // Sorting by views is offered only when Google reports views for these photos.
+  const hasViews = photos.some((p) => p.views != null);
+  const [sort, setSort] = useState<"newest" | "views">("newest");
   const galleryInput = useRef<HTMLInputElement>(null);
   const logoInput = useRef<HTMLInputElement>(null);
   const coverInput = useRef<HTMLInputElement>(null);
-  const shown = filter === "all" ? gallery : gallery.filter((p) => p.category === filter);
+  const filtered = filter === "all" ? gallery : gallery.filter((p) => p.category === filter);
+  const shown = hasViews && sort === "views" ? [...filtered].sort((a, b) => (b.views ?? -1) - (a.views ?? -1)) : filtered;
   const viewing = viewIndex != null ? shown[viewIndex] : null;
 
   const upload = async (files: FileList | File[] | null, category: PhotoCategory, key: string) => {
@@ -113,7 +119,7 @@ export function PhotosPanel({ location }: { location: Location }) {
         {photo ? (
           <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={photo.url} alt={kind === "logo" ? `${location.title} logo` : `${location.title} cover photo`} className="h-full w-full object-cover" />
+            <img referrerPolicy="no-referrer" src={photo.url} alt={kind === "logo" ? `${location.title} logo` : `${location.title} cover photo`} className="h-full w-full object-cover" />
             <div className="absolute inset-x-0 bottom-0 flex justify-end gap-1.5 bg-gradient-to-t from-black/60 to-transparent p-2 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
               <button type="button" className={buttonClass("secondary", "sm", "h-7 text-xs")} onClick={() => input.current?.click()} disabled={!!busy}>
                 Replace
@@ -184,7 +190,21 @@ export function PhotosPanel({ location }: { location: Location }) {
       >
         <SubHead action={<span className={cn("text-xs tabular-nums", gallery.length >= 10 ? "text-success" : "text-muted-foreground")}>{gallery.length} of 10+ recommended</span>}>Photos</SubHead>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          {gallery.length > 0 ? <Segmented size="sm" value={filter} onChange={setFilter} label="Photo category" options={filterOptions} /> : <span />}
+          <div className="flex flex-wrap items-center gap-2">
+            {gallery.length > 0 ? <Segmented size="sm" value={filter} onChange={setFilter} label="Photo category" options={filterOptions} /> : <span />}
+            {hasViews && (
+              <Segmented
+                size="sm"
+                value={sort}
+                onChange={setSort}
+                label="Sort photos"
+                options={[
+                  { value: "newest", label: "Newest" },
+                  { value: "views", label: "Most viewed" },
+                ]}
+              />
+            )}
+          </div>
           <div className="flex items-center gap-2">
             {filter === "all" && (
               <SelectBox
@@ -218,8 +238,14 @@ export function PhotosPanel({ location }: { location: Location }) {
               <li key={p.id}>
                 <button type="button" onClick={() => setViewIndex(i)} className="group relative block aspect-square w-full overflow-hidden rounded-lg bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={p.url} alt={`${photoCategoryLabel(p.category)} photo`} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]" />
-                  <span className="absolute bottom-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white">{photoCategoryLabel(p.category)}</span>
+                  <img referrerPolicy="no-referrer" src={p.url} alt={`${photoCategoryLabel(p.category)} photo`} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]" />
+                  <span className="absolute bottom-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white">{p.fromCustomer ? "Customer" : photoCategoryLabel(p.category)}</span>
+                  {p.views != null && (
+                    <span className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white" title={`${p.views.toLocaleString("en-US")} views on Google`}>
+                      <Eye className="h-3 w-3" />
+                      {views(p.views)}
+                    </span>
+                  )}
                 </button>
               </li>
             ))}
@@ -255,7 +281,7 @@ export function PhotosPanel({ location }: { location: Location }) {
           <div className="grid min-h-0 flex-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_260px]">
             <div className="relative flex items-center justify-center bg-foreground/95 md:min-h-[460px]">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={viewing.url} alt={`${photoCategoryLabel(viewing.category)} photo`} className="max-h-[65vh] w-auto max-w-full object-contain" />
+              <img referrerPolicy="no-referrer" src={viewing.url} alt={`${photoCategoryLabel(viewing.category)} photo`} className="max-h-[65vh] w-auto max-w-full object-contain" />
               {viewIndex! > 0 && (
                 <button type="button" onClick={() => setViewIndex(viewIndex! - 1)} className={buttonClass("secondary", "icon", "absolute left-3 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full")} aria-label="Previous photo">
                   <ChevronLeft />
@@ -268,6 +294,11 @@ export function PhotosPanel({ location }: { location: Location }) {
               )}
             </div>
             <div className="space-y-4 p-5">
+              {viewing.fromCustomer ? (
+                <p className="rounded-lg bg-muted px-3 py-2.5 text-sm text-muted-foreground">
+                  Added by a customer on Google. It counts toward your photos, but only Google can change or remove it. Report it on Google Maps if it shouldn&apos;t be there.
+                </p>
+              ) : (
               <div>
                 <p className="label-caps mb-1.5">Category</p>
                 <SelectBox
@@ -277,7 +308,14 @@ export function PhotosPanel({ location }: { location: Location }) {
                   options={[...PHOTO_CATEGORIES.map((c) => ({ value: c.id, label: c.label })), { value: "cover", label: "Use as cover photo" }, { value: "logo", label: "Use as logo" }]}
                 />
               </div>
+              )}
               <dl className="space-y-1 text-sm">
+                {viewing.views != null && (
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted-foreground">Views on Google</dt>
+                    <dd className="font-semibold tabular-nums">{viewing.views.toLocaleString("en-US")}</dd>
+                  </div>
+                )}
                 <div className="flex justify-between gap-3">
                   <dt className="text-muted-foreground">Added</dt>
                   <dd>{dateLabel(viewing.createdAt)}</dd>
@@ -296,9 +334,11 @@ export function PhotosPanel({ location }: { location: Location }) {
                 </div>
               </dl>
               {viewing.width != null && viewing.width < PHOTO_RECOMMENDED_PX && <p className="rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">Smaller than {PHOTO_RECOMMENDED_PX} px. It may look blurry on large screens.</p>}
-              <button type="button" className={buttonClass("outline", "sm", "w-full text-destructive hover:bg-destructive/10 hover:text-destructive")} disabled={!!busy} onClick={() => remove(viewing)}>
-                {busy === `del:${viewing.id}` ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete photo
-              </button>
+              {!viewing.fromCustomer && (
+                <button type="button" className={buttonClass("outline", "sm", "w-full text-destructive hover:bg-destructive/10 hover:text-destructive")} disabled={!!busy} onClick={() => remove(viewing)}>
+                  {busy === `del:${viewing.id}` ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete photo
+                </button>
+              )}
             </div>
           </div>
         )}

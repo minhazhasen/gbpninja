@@ -57,6 +57,16 @@ export const db = {
   exec(sql: string) {
     open().exec(sql);
   },
+  /** AppState documents (src/lib/gbp/persist.ts). */
+  getState(key: string): string | null {
+    const row = open().prepare('SELECT "value" FROM "AppState" WHERE "key" = ?').get(key) as { value: string } | undefined;
+    return row?.value ?? null;
+  },
+  setState(key: string, value: string) {
+    open()
+      .prepare('INSERT INTO "AppState" ("key","value","updatedAt") VALUES (?,?,?) ON CONFLICT("key") DO UPDATE SET "value"=excluded."value","updatedAt"=excluded."updatedAt"')
+      .run(key, value, new Date().toISOString());
+  },
   googleToken: {
     async findUnique({ where }: { where: { purpose: string } }) {
       return toRow(open().prepare('SELECT * FROM "GoogleToken" WHERE "purpose" = ?').get(where.purpose) as Record<string, unknown> | undefined);

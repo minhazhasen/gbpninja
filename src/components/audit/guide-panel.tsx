@@ -8,7 +8,7 @@ import { Check, Copy, Lightbulb, Plus, X } from "lucide-react";
 import { Card, buttonClass } from "@/components/ui";
 import type { AuditTab } from "@/lib/audit";
 import type { Location, ProfileSuggestions } from "@/lib/gbp/types";
-import { DESCRIPTION_GOOD, MAX_SECONDARY_CATEGORIES, attributeLabel, cityOf, suggestDescription } from "@/lib/profile";
+import { DAYS, DAY_LABEL, DESCRIPTION_GOOD, MAX_SECONDARY_CATEGORIES, attributeLabel, cityOf, formatOpeningDate, suggestDescription } from "@/lib/profile";
 
 interface Guide {
   title: string;
@@ -20,9 +20,23 @@ interface Guide {
   examples?: { label: string; value: string; good?: boolean }[];
 }
 
+/** "60 USD" / "$60" in the profile's own currency. */
+const priceText = (price: number | undefined, currency?: string) =>
+  price == null ? "" : new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", maximumFractionDigits: price % 1 ? 2 : 0 }).format(price);
+const hhmm12 = (t: string) => {
+  const [h, m] = t.split(":").map(Number);
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, "0")}` : ""} ${h < 12 ? "AM" : "PM"}`;
+};
+
+/**
+ * Examples come from this profile's own data (its services, hours, links, attributes). Where the profile has nothing yet,
+ * a plain format hint is shown — never another business's details.
+ */
 function guideFor(key: string, l: Location, s: ProfileSuggestions): Guide {
   const city = cityOf(l.address) || "your city";
-  const kind = l.primaryCategory.toLowerCase();
+  const kind = l.primaryCategory.toLowerCase() || "business";
+  const services = l.services.filter((x) => x.name);
+  const firstService = services[0]?.name;
   switch (key) {
     // ---- About
     case "about":
@@ -42,7 +56,7 @@ function guideFor(key: string, l: Location, s: ProfileSuggestions): Guide {
         title: "Business name",
         why: "Your name must match your storefront, website and signage. Extra keywords are against Google's guidelines and can get the profile suspended.",
         recommended: ["Exactly as it appears on your sign and website", "Same spelling and capitalisation everywhere"],
-        avoid: ['Keywords or locations ("Best Dentist Austin")', "Taglines, phone numbers or URLs", "ALL CAPS or special characters"],
+        avoid: [`Keywords or locations ("Best ${l.primaryCategory || "Business"} ${city}")`, "Taglines, phone numbers or URLs", "ALL CAPS or special characters"],
         examples: [
           { label: "Good", value: l.title, good: true },
           { label: "Avoid", value: `${l.title} – Best ${l.primaryCategory} in ${city}` },
@@ -74,7 +88,7 @@ function guideFor(key: string, l: Location, s: ProfileSuggestions): Guide {
       return {
         title: "Opening date",
         recommended: ["Year and month are required; add the day if you know it", "The date you first opened at this address", "Use a future date (up to a year ahead) if you haven't opened yet"],
-        examples: [{ label: "Example", value: "March 2016", good: true }],
+        examples: [{ label: l.openingDate ? "On your profile" : "Format", value: l.openingDate ? formatOpeningDate(l.openingDate) : "Month and year, e.g. March 2016", good: true }],
       };
 
     // ---- Contact
@@ -89,41 +103,47 @@ function guideFor(key: string, l: Location, s: ProfileSuggestions): Guide {
         title: "Phone number",
         recommended: ["A local number rather than a call centre", "Answered during your listed hours", "Add up to 2 more numbers (e.g. a mobile)"],
         avoid: ["Premium-rate numbers", "Numbers that redirect to another business"],
-        examples: [{ label: "Example", value: l.phone || "+1 512-555-0134", good: true }],
+        examples: l.phone ? [{ label: "On your profile", value: l.phone, good: true }] : undefined,
       };
     case "chat":
       return {
         title: "Chat",
         why: "Adds a Chat button so customers can message you directly.",
         recommended: ["A WhatsApp click-to-chat link or an SMS link", "Only if someone replies within a few hours"],
-        examples: [
-          { label: "WhatsApp", value: "https://wa.me/15125550134", good: true },
-          { label: "SMS", value: "sms:+15125550134", good: true },
-        ],
+        examples: l.chatUri
+          ? [{ label: "On your profile", value: l.chatUri, good: true }]
+          : [
+              { label: "WhatsApp", value: `https://wa.me/${(l.phone ?? "").replace(/\D/g, "") || "<your number>"}`, good: true },
+              { label: "SMS", value: `sms:${l.phone?.replace(/[^\d+]/g, "") || "<your number>"}`, good: true },
+            ],
       };
     case "web":
       return {
         title: "Website",
         recommended: ["Your homepage, or the page for this location if you have several", "A secure https:// address", "A page that loads fast on phones"],
         avoid: ["Social media pages as your website", "Links that redirect to another domain"],
-        examples: [{ label: "Example", value: l.websiteUri || "https://example.com/austin", good: true }],
+        examples: l.websiteUri ? [{ label: "On your profile", value: l.websiteUri, good: true }] : undefined,
       };
     case "book":
       return {
         title: "Appointment link",
         why: "Adds a Book button so customers can book straight from Search and Maps.",
         recommended: ["A page where customers can book directly", "Your booking provider's page for this location"],
-        examples: [{ label: "Example", value: "https://example.com/book", good: true }],
+        examples: l.appointmentUri ? [{ label: "On your profile", value: l.appointmentUri, good: true }] : undefined,
       };
     case "social":
       return {
         title: "Social profiles",
         recommended: ["Link the profiles you post on regularly", "Use the full profile URL", "At least 2 networks"],
         avoid: ["Inactive or personal profiles"],
-        examples: [
-          { label: "Facebook", value: "https://www.facebook.com/yourpage", good: true },
-          { label: "Instagram", value: "https://www.instagram.com/yourhandle/", good: true },
-        ],
+        examples: Object.values(l.socialProfiles ?? {}).filter(Boolean).length
+          ? Object.entries(l.socialProfiles ?? {})
+              .filter(([, v]) => v)
+              .map(([k, v]) => ({ label: k[0].toUpperCase() + k.slice(1), value: v!, good: true }))
+          : [
+              { label: "Facebook", value: "https://www.facebook.com/yourpage", good: true },
+              { label: "Instagram", value: "https://www.instagram.com/yourhandle/", good: true },
+            ],
       };
 
     // ---- Location
@@ -138,17 +158,16 @@ function guideFor(key: string, l: Location, s: ProfileSuggestions): Guide {
         title: "Business location",
         recommended: ["Full street address with suite or unit number", 'Choose No for "Show business address" only if customers don\'t visit you'],
         avoid: ["PO boxes or virtual offices", "Cross streets or landmarks instead of an address"],
-        examples: [{ label: "Example", value: l.address || "120 Main St, Suite 200, Austin, TX 78701", good: true }],
+        examples: l.address ? [{ label: "On your profile", value: l.address, good: true }] : undefined,
       };
     case "area":
       return {
         title: "Service area",
         recommended: ["Cities, ZIP codes or regions you actually travel to", "Up to 20 areas", "Keep it within about 2 hours' drive of your base"],
         avoid: ["Whole states or countries"],
-        examples: [
-          { label: "Area", value: `${city}, TX, USA`, good: true },
-          { label: "Area", value: "Round Rock, TX, USA", good: true },
-        ],
+        examples: l.serviceArea?.length
+          ? l.serviceArea.slice(0, 3).map((a) => ({ label: "On your profile", value: a, good: true }))
+          : [{ label: "Area", value: city, good: true }],
       };
 
     // ---- Hours
@@ -162,10 +181,16 @@ function guideFor(key: string, l: Location, s: ProfileSuggestions): Guide {
           "Add special hours before every public holiday",
           'Use "More hours" for delivery, pick-up or online hours',
         ],
-        examples: [
-          { label: "Weekdays", value: "Mon–Fri: 8 AM–6 PM", good: true },
-          { label: "Weekend", value: "Sat: 9 AM–1 PM · Sun: Closed", good: true },
-        ],
+        examples: l.regularHours?.length
+          ? DAYS.slice(0, 7)
+              .map((d) => {
+                const ps = (l.regularHours ?? []).filter((p) => p.day === d);
+                return { label: DAY_LABEL[d], value: ps.length ? ps.map((p) => `${hhmm12(p.open)}–${hhmm12(p.close)}`).join(", ") : "Closed", good: true };
+              })
+          : [
+              { label: "Weekdays", value: "Mon–Fri: 8 AM–6 PM", good: true },
+              { label: "Weekend", value: "Sat: 9 AM–1 PM · Sun: Closed", good: true },
+            ],
       };
     case "special":
       return {
@@ -180,7 +205,9 @@ function guideFor(key: string, l: Location, s: ProfileSuggestions): Guide {
       return {
         title: "More hours",
         recommended: ["Add only when it differs from your main hours", "Common: Access, Delivery, Pick-up, Online operating hours"],
-        examples: [{ label: "Access", value: "Mon–Fri: 5 AM–11 PM", good: true }],
+        examples: l.moreHours?.length
+          ? l.moreHours.slice(0, 3).map((h) => ({ label: h.type, value: h.periods.map((p) => `${DAY_LABEL[p.day as keyof typeof DAY_LABEL] ?? p.day} ${hhmm12(p.open)}–${hhmm12(p.close)}`).slice(0, 2).join(", "), good: true }))
+          : [{ label: "Access", value: "Mon–Fri: 5 AM–11 PM", good: true }],
       };
 
     // ---- More (attributes)
@@ -191,20 +218,31 @@ function guideFor(key: string, l: Location, s: ProfileSuggestions): Guide {
         why: 'Shown under About and used to match searches like "wheelchair accessible" or "accepts credit cards".',
         recommended: ["Turn on everything that's true", "Accessibility and payment options matter to many customers", "Review them when something changes"],
         avoid: ["Attributes that aren't true. Customers can suggest edits and Google may remove them."],
-        examples: s.attributes.slice(0, 4).map((a) => ({ label: a.reason || "Suggested", value: attributeLabel(a.name), good: true })),
+        // Live: what Google offers this profile and hasn't been answered yet; demo: our suggestions.
+        examples: l.attributeCatalog
+          ? l.attributeCatalog
+              .filter((d) => l.attributeValues?.[d.id] === undefined)
+              .slice(0, 4)
+              .map((d) => ({ label: `Not answered · ${d.group}`, value: d.label, good: true }))
+          : s.attributes.slice(0, 4).map((a) => ({ label: a.reason || "Suggested", value: attributeLabel(a.name), good: true })),
       };
 
     // ---- Services, products, photos
     case "services":
       return {
         title: "Services",
-        why: 'Services help you appear for specific searches like "teeth whitening near me".',
+        why: `Services help you appear for specific searches like "${(firstService ?? kind).toLowerCase()} near me".`,
         recommended: ["At least 5 services", 'A price or "From" price for each', "A short description: what's included and how long it takes", "Group services under the right category"],
         avoid: ["Duplicating the same service under several names", "Prices you can't honour"],
-        examples: [
-          { label: "Service", value: "Teeth whitening · From $199", good: true },
-          { label: "Description", value: "In-office whitening in about 60 minutes, with take-home trays for touch-ups.", good: true },
-        ],
+        examples: services.length
+          ? services.slice(0, 3).flatMap((x) => [
+              { label: "Service on your profile", value: [x.name, priceText(x.price, x.currencyCode)].filter(Boolean).join(" · "), good: true },
+              ...(x.description ? [{ label: "Its description", value: x.description, good: true }] : []),
+            ])
+          : [
+              { label: "Service", value: `A service you offer as a ${kind} · its price`, good: true },
+              { label: "Description", value: "What's included and how long it takes, in one or two sentences.", good: true },
+            ],
       };
     case "products":
       return {
@@ -212,7 +250,9 @@ function guideFor(key: string, l: Location, s: ProfileSuggestions): Guide {
         why: "Products appear as a scrollable catalogue with photos and prices on your profile.",
         recommended: ["At least 3 products", "A clear square photo for each", "A price or price range", "A button linking to buy or learn more"],
         avoid: ["Stock photos with watermarks", "Services listed as products"],
-        examples: [{ label: "Product", value: "Electric toothbrush · $89 · Buy", good: true }],
+        examples: l.products?.length
+          ? l.products.slice(0, 3).map((p) => ({ label: "Product on your profile", value: p.name, good: true }))
+          : [{ label: "Product", value: "Product name · price · button (Buy, Order…)", good: true }],
       };
     case "photos":
       return {

@@ -3,15 +3,23 @@ import { CheckCircle2, Crown, MapPin, UserRound } from "lucide-react";
 import { BrandLogo } from "@/components/brand";
 import { AcceptInvite } from "./accept";
 import { getProvider } from "@/lib/gbp";
+import { tenantForInvite } from "@/lib/gbp/tenancy";
+import { runInTenant } from "@/lib/gbp/tenant-context";
 
 export const dynamic = "force-dynamic";
 
 /** Public page behind an invite link. Live mode will require signing in with the invited email first. */
 export default async function InvitePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
-  const provider = await getProvider();
-  const invite = /^[a-f0-9]{16,64}$/.test(token) ? await provider.findInvite(token) : null;
-  const locations = invite ? await provider.listLocations() : [];
+  // The invite belongs to the workspace that sent it, not to whoever opens the link.
+  const tenant = /^[a-f0-9]{16,64}$/.test(token) ? tenantForInvite(token) : null;
+  const { invite, locations } = tenant
+    ? await runInTenant(tenant, async () => {
+        const provider = await getProvider();
+        const invite = await provider.findInvite(token);
+        return { invite, locations: invite ? await provider.listLocations() : [] };
+      })
+    : { invite: null, locations: [] };
   const access = !invite
     ? ""
     : invite.role === "admin" || !invite.locationIds.length

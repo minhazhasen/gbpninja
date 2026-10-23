@@ -1,4 +1,4 @@
-import { postStatusFromResults, type Channel, type Post } from "../posts";
+import { postStatusFromResults, type Channel, type ChannelResult, type Post, type PostStats } from "../posts";
 import { MAX_COMPETITORS, addPoint } from "../competitors";
 import { emptyDraft } from "../posts";
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
@@ -30,9 +30,12 @@ import type {
 import { STARTER_TEMPLATES } from "../templates";
 import { needsFollowUpTask } from "../tasks";
 import { auditLocation } from "../audit";
+import { currentTenant } from "./tenant-context";
 import { disconnectGoogle, googleAccount, googleOAuthConfigured } from "../google/oauth";
 import { listGbpLocations } from "../google/business";
 import { sendGmail } from "../google/gmail";
+import { disconnectMeta, metaAccount, metaConfigured, metaPages } from "../meta/oauth";
+import { deleteFromFacebook, publishToFacebook, publishToInstagram } from "../meta/publish";
 
 // In-memory demo data so the app runs without Google API access.
 // State resets on server restart. It lives on globalThis so dev-mode module
@@ -57,7 +60,7 @@ const withLogo = (key: string, letter: string, bg: string, rest: Photo[]): Photo
   ...rest,
 ];
 /** Keep the derived counters in sync with the photo list. */
-function syncPhotoStats(l: Location) {
+export function syncPhotoStats(l: Location) {
   const ps = l.photos ?? [];
   l.photoCount = ps.filter((p) => p.category !== "logo" && p.category !== "cover").length;
   l.hasLogo = ps.some((p) => p.category === "logo");
@@ -276,7 +279,7 @@ function seedRequests(): ReviewRequest[] {
   ];
 }
 
-interface MockState {
+export interface MockState {
   /** Competitors the workspace added / removed, per location (added after the first release of this state, hence optional). */
   competitorEdits?: Record<string, { added: Competitor[]; hidden: string[] }>;
   /** Demo password hashes by member id ("salt:hash", scrypt). Never sent to the client. */
@@ -297,7 +300,7 @@ interface MockState {
   dismissedReviewTasks: Set<string>;
 }
 // Bump the key when the state shape changes so a running dev server re-seeds.
-const g = globalThis as unknown as { __gbpMockV20?: MockState };
+const g = globalThis as unknown as { __gbpMockV21?: MockState };
 
 const at = (day: number, hour: number) => {
   const d = new Date(Date.now() + day * 86_400_000);
@@ -327,6 +330,7 @@ function seedPosts(): Post[] {
       scheduled_at: at(-12, 10),
       published_at: at(-12, 10),
       results: published(["google", "facebook"], -12),
+      stats: { facebook: stats(2140, 1610, 54, 88, 9, 6) },
     }),
     base("p2", {
       title: "Meet the team",
@@ -336,6 +340,7 @@ function seedPosts(): Post[] {
       scheduled_at: at(-6, 13),
       published_at: at(-6, 13),
       results: published(["google", "facebook", "linkedin"], -6),
+      stats: { facebook: stats(980, 760, 21, 64, 12, 3), linkedin: stats(1240, 890, 37, 41, 5, 4) },
     }),
     base("p3", {
       title: "Holiday hours",
@@ -371,7 +376,43 @@ function seedPosts(): Post[] {
       status: "draft",
       scheduled_at: at(16, 9),
     }),
+    // Posted straight on the networks (not from the app): pulled in on sync and shown read-only.
+    imported("google", -5, 11, "Free whitening consult", "Book a free whitening consult this week — limited spots available.", {
+      google: { ...emptyDraft().google, cta: { type: "BOOK", url: "https://example.com/book" } },
+    }),
+    imported("facebook", -4, 18, "Behind the scenes", "A day in the life at the clinic. Thanks to our amazing team! 🦷", { stats: { facebook: stats(1820, 1340, 46, 132, 18, 9) } }),
+    imported("instagram", -8, 12, "New treatment room", "Our brand-new treatment room is ready ✨ #newlook #austin", {
+      stats: { instagram: { ...stats(3120, 2410, null, 214, 23, null), saves: 31 } },
+    }),
+    imported("linkedin", -10, 9, "We're hiring", "We're hiring a dental hygienist to join our Austin team. DM us or apply on our site.", { stats: { linkedin: stats(2650, 1980, 88, 57, 11, 14) } }),
+    imported("x", -3, 15, "Saturday hours", "Open this Saturday 9–1. Walk-ins welcome!", { stats: { x: stats(940, null, 12, 18, 2, 4) } }),
   ];
+}
+
+/** Demo engagement: views, reach, clicks, likes, comments, shares. */
+function stats(views: number, reach: number | null, clicks: number | null, likes: number, comments: number, shares: number | null): PostStats {
+  return { views, reach, clicks, likes, comments, shares, fetched_at: new Date(Date.now() - 2 * 3_600_000).toISOString() };
+}
+
+/** A post made directly on a network that the sync pulled into the calendar. */
+function imported(channel: Channel, day: number, hour: number, title: string, body: string, patch: Partial<Post> = {}): Post {
+  const draft = emptyDraft();
+  const when = at(day, hour);
+  return {
+    ...draft,
+    id: `imp_${channel}_${-day}`,
+    title,
+    body,
+    channels: [channel],
+    status: "published",
+    scheduled_at: when,
+    published_at: when,
+    created_at: when,
+    results: { [channel]: { status: "published", posted_at: when, permalink: null, external_ids: [`demo-${channel}-${-day}`] } },
+    imported: { channel, external_id: `demo-${channel}-${-day}` },
+    ...patch,
+    google: { ...draft.google, ...patch.google },
+  };
 }
 
 /** Deterministic per calendar day, so every page shows the same numbers for the same date. */
@@ -756,24 +797,85 @@ function seedTasks(): Task[] {
   ];
 }
 
-const state: MockState = (g.__gbpMockV20 ??= {
-  locations: seedLocations,
-  reviews: new Map(seedLocations.map((l, i) => [l.id, seededReviews(l.id, i)])),
-  requests: seedRequests(),
-  posts: seedPosts(),
-  // Demo: a mix of states so Settings shows every case.
-  connections: seedConnections(),
-  members: seedMembers(),
-  passwords: new Map(),
-  postSeq: 100,
-  searchConsole: { status: "not_connected", sites: {} },
-  tasks: seedTasks(),
-  dismissedReviewTasks: new Set(),
-  // Demo: Gmail starts disconnected so Settings → Email shows the connect flow.
-  emailSender: { status: "not_connected", sentToday: 0, dailyLimit: 500 },
-  templates: STARTER_TEMPLATES.map((t, i) => ({ ...t, id: `tpl${i + 1}`, updatedAt: new Date(Date.now() - (i + 2) * 86_400_000).toISOString() })),
-});
-const { locations, reviews } = state;
+/** Live mode: real Google data (src/lib/gbp/live.ts) and no demo content; the workspace state is saved to SQLite. */
+export const liveMode = () => process.env.GBP_DATA_SOURCE === "google";
+
+/** A new workspace: nothing but the starter message templates. */
+export function emptyState(): MockState {
+  return {
+    locations: [],
+    reviews: new Map(),
+    requests: [],
+    posts: [],
+    connections: [],
+    members: [],
+    passwords: new Map(),
+    postSeq: 100,
+    searchConsole: { status: "not_connected", sites: {} },
+    tasks: [],
+    dismissedReviewTasks: new Set(),
+    emailSender: { status: "not_connected", sentToday: 0, dailyLimit: 500 },
+    templates: STARTER_TEMPLATES.map((t, i) => ({ ...t, id: `tpl${i + 1}`, updatedAt: new Date().toISOString() })),
+    competitorEdits: {},
+  };
+}
+
+/** The demo workspace (sample data). Each signed-in demo user gets their own deep copy (see tenancy.ts). */
+export function seedState(): MockState {
+  return structuredClone<MockState>({
+    locations: seedLocations,
+    reviews: new Map(seedLocations.map((l, i) => [l.id, seededReviews(l.id, i)])),
+    requests: seedRequests(),
+    posts: seedPosts(),
+    // Demo: a mix of states so Settings shows every case.
+    connections: seedConnections(),
+    members: seedMembers(),
+    passwords: new Map(),
+    postSeq: 100,
+    searchConsole: { status: "not_connected", sites: {} },
+    tasks: seedTasks(),
+    dismissedReviewTasks: new Set(),
+    // Demo: Gmail starts disconnected so Settings → Email shows the connect flow.
+    emailSender: { status: "not_connected", sentToday: 0, dailyLimit: 500 },
+    templates: STARTER_TEMPLATES.map((t, i) => ({ ...t, id: `tpl${i + 1}`, updatedAt: new Date(Date.now() - (i + 2) * 86_400_000).toISOString() })),
+  } as MockState);
+}
+
+// Without a signed-in workspace (open demo, local tools) the demo uses one shared sample workspace. Live mode never does:
+// there every call must run inside a workspace (gbp/index.ts), so one customer's data can't reach another.
+const base: MockState | null = liveMode() ? null : (g.__gbpMockV21 ??= seedState());
+function current(): MockState {
+  const t = currentTenant();
+  if (t) return t.state as MockState;
+  if (base) return base;
+  throw new Error("No workspace for this request");
+}
+
+/** An object that forwards every access to `pick()` at the time of use (methods bound to it, so Map/Array methods work). */
+function view<T extends object>(pick: () => T): T {
+  return new Proxy({} as T, {
+    get: (_, k) => {
+      const t = pick();
+      const v = Reflect.get(t, k, t);
+      return typeof v === "function" ? v.bind(t) : v;
+    },
+    set: (_, k, v) => Reflect.set(pick(), k, v),
+    has: (_, k) => Reflect.has(pick(), k),
+    deleteProperty: (_, k) => Reflect.deleteProperty(pick(), k),
+    ownKeys: () => Reflect.ownKeys(pick()),
+    getOwnPropertyDescriptor: (_, k) => {
+      const d = Reflect.getOwnPropertyDescriptor(pick(), k);
+      if (d) d.configurable = true;
+      return d;
+    },
+  });
+}
+
+/** The current workspace's data. live.ts refreshes the Google parts in place; gbp/index.ts saves it after every call. */
+const state: MockState = view(current);
+export const workspace = state;
+const locations = view(() => current().locations);
+const reviews = view(() => current().reviews);
 
 /** One follow-up task (with the usual steps as subtasks) per unhappy review that doesn't have one yet. */
 function syncReviewTasks() {
@@ -817,6 +919,18 @@ const conn = (channel: Channel) => {
   }
   return c;
 };
+
+/** Publish to the connected Facebook Page / Instagram account (meta/publish.ts) → that channel's result. */
+export async function publishMeta(post: Post, channel: "facebook" | "instagram"): Promise<ChannelResult> {
+  const target = state.connections.find((x) => x.channel === channel)?.targets[0]?.id;
+  if (!target) return { status: "failed", error: `Choose a ${channel === "facebook" ? "Facebook Page" : "Instagram account"} in Settings → Accounts` };
+  try {
+    const r = channel === "facebook" ? await publishToFacebook(post, target) : await publishToInstagram(post, target);
+    return { status: "published", posted_at: new Date().toISOString(), permalink: r.permalink, external_ids: [r.id] };
+  } catch (e) {
+    return { status: "failed", error: e instanceof Error ? e.message : `${channel} didn't accept the post` };
+  }
+}
 
 const findPost = (id: string) => {
   const post = state.posts.find((p) => p.id === id);
@@ -1137,11 +1251,21 @@ export const mockProvider: GbpProvider = {
       if (!account) Object.assign(g, { status: "not_connected", account: null, targets: [], connectedAt: null, lastSyncAt: null, error: null });
       else if (g.account !== account.email) Object.assign(g, { status: "needs_selection", account: account.email, targets: [], connectedAt: account.connectedAt, error: null });
     }
+    // Real Meta app (META_APP_ID … set): the Facebook / Instagram rows follow the stored Facebook connection.
+    if (metaConfigured()) {
+      const account = await metaAccount();
+      for (const ch of ["facebook", "instagram"] as const) {
+        const c = conn(ch);
+        if (!account) Object.assign(c, { status: "not_connected", account: null, targets: [], connectedAt: null, lastSyncAt: null, expiresAt: null, error: null });
+        else if (c.account !== account.name && c.status !== "not_connected") Object.assign(c, { status: "needs_selection", account: account.name, targets: [], error: null });
+      }
+    }
     return state.connections;
   },
   async connectChannel(channel, account) {
     const c = conn(channel);
-    if (channel === "google" && account) {
+    // A real sign-in (Google, or Facebook for a Page / Instagram) passes the account: next, pick what to manage.
+    if ((channel === "google" || channel === "facebook" || channel === "instagram") && account) {
       Object.assign(c, { account, status: "needs_selection", targets: [], connectedAt: new Date().toISOString(), lastSyncAt: null, expiresAt: null, error: null });
       return c;
     }
@@ -1161,6 +1285,18 @@ export const mockProvider: GbpProvider = {
     // Real Google account connected: its actual Business Profile locations.
     if (channel === "google" && (await googleAccount("gbp"))) return listGbpLocations();
     if (channel === "google") return seedLocations.map((l) => ({ id: l.id, name: l.title, sub: `${l.address} · owner@example.com` }));
+    // Real Facebook connection: its Pages, and the Instagram business accounts linked to them.
+    if ((channel === "facebook" || channel === "instagram") && (await metaAccount())) {
+      const pages = await metaPages(true);
+      if (channel === "facebook")
+        return pages.map((p) => ({ id: p.id, name: p.name, sub: [p.category, p.instagram ? `Instagram @${p.instagram.username} linked` : null].filter(Boolean).join(" · ") || "Facebook Page" }));
+      return pages.map((p) => ({
+        id: p.instagram?.id ?? `no-ig-${p.id}`,
+        name: p.instagram ? `@${p.instagram.username}` : p.name,
+        sub: `Via Facebook Page ${p.name}`,
+        disabled: p.instagram ? null : "No Instagram business account linked to this Page",
+      }));
+    }
     if (channel === "facebook") return DEMO_PAGES.map((p) => ({ id: p.id, name: p.name, sub: p.ig ? `Instagram @${p.ig} linked` : "Facebook Page" }));
     if (channel === "instagram")
       return DEMO_PAGES.map((p) => ({ id: p.id, name: p.ig ? `@${p.ig}` : p.name, sub: `Via Facebook Page ${p.name}`, disabled: p.ig ? null : "No Instagram business account linked" }));
@@ -1178,6 +1314,11 @@ export const mockProvider: GbpProvider = {
   },
   async disconnectChannel(channel) {
     if (channel === "google" && googleOAuthConfigured()) await disconnectGoogle("gbp");
+    // Facebook and Instagram share one Facebook connection: revoke it when neither is left.
+    if ((channel === "facebook" || channel === "instagram") && (await metaAccount())) {
+      const other = conn(channel === "facebook" ? "instagram" : "facebook");
+      if (channel === "facebook" || other.status === "not_connected") await disconnectMeta();
+    }
     Object.assign(conn(channel), { status: "not_connected", account: null, targets: [], connectedAt: null, lastSyncAt: null, expiresAt: null, error: null });
     // Instagram publishes through the Facebook Page.
     if (channel === "facebook") Object.assign(conn("instagram"), { status: "not_connected", account: null, targets: [], connectedAt: null, lastSyncAt: null });
@@ -1313,19 +1454,28 @@ export const mockProvider: GbpProvider = {
   async publishPost(id) {
     const post = findPost(id);
     const now = new Date().toISOString();
-    post.results = Object.fromEntries(
-      post.channels.map((c) =>
-        state.connections.some((x) => x.channel === c && isLive(x))
-          ? [c, { status: "published" as const, posted_at: now }]
-          : [c, post.results?.[c]?.status === "published" ? post.results[c] : { status: "failed" as const, error: `${c} is not connected` }],
-      ),
-    );
+    const results: Post["results"] = {};
+    for (const c of post.channels) {
+      if (post.results?.[c]?.status === "published") results[c] = post.results[c];
+      else if (!state.connections.some((x) => x.channel === c && isLive(x))) results[c] = { status: "failed", error: `${c} is not connected` };
+      // Real Facebook / Instagram connection: publish for real (demo channels are only simulated).
+      else if ((c === "facebook" || c === "instagram") && (await metaAccount())) results[c] = await publishMeta(post, c);
+      else results[c] = { status: "published", posted_at: now };
+    }
+    post.results = results;
     post.status = postStatusFromResults(post.channels, post.results);
     post.published_at = now;
     post.scheduled_at ??= now;
     return post;
   },
   async deletePost(id) {
+    // Published to the real Facebook Page: delete it there first (a refusal keeps the post here, so it can be retried).
+    const post = state.posts.find((p) => p.id === id);
+    const fb = post?.results?.facebook;
+    if (fb?.status === "published" && fb.external_ids?.length && (await metaAccount())) {
+      const pageId = state.connections.find((x) => x.channel === "facebook")?.targets[0]?.id;
+      for (const ext of fb.external_ids) await deleteFromFacebook(ext, pageId);
+    }
     state.posts = state.posts.filter((p) => p.id !== id);
   },
 };

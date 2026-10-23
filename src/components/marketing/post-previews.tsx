@@ -8,7 +8,7 @@
  * platforms' own greys / link blues (the one place raw colours are allowed, like ChannelIcon).
  */
 import { useState, type ReactNode } from "react";
-import { format } from "date-fns";
+import { format, formatDistanceToNowStrict } from "date-fns";
 import {
   Bookmark,
   ChevronLeft,
@@ -134,7 +134,7 @@ function VideoTile({ m, className }: { m: PostMedia; className?: string }) {
 }
 
 function Tile({ m, className }: { m: PostMedia; className?: string }) {
-  return m.type === "video" ? <VideoTile m={m} className={className} /> : <img src={m.url} alt={m.alt ?? ""} className={cn("bg-[#F0F2F5] object-cover", className)} />;
+  return m.type === "video" ? <VideoTile m={m} className={className} /> : <img referrerPolicy="no-referrer" src={m.url} alt={m.alt ?? ""} className={cn("bg-[#F0F2F5] object-cover", className)} />;
 }
 
 const domainOf = (url: string) => {
@@ -160,11 +160,29 @@ const titleOf = (url: string) => {
 };
 
 // ================================================================ Google
+/**
+ * The post's time the way each network shows it. No time (posting now) or within the last minute: "Just now". Past posts get their
+ * real date (Google: "3 days ago"; LinkedIn: "2d"), scheduled ones the date they'll go out.
+ */
+function postTime(when: Date | null, network: "google" | "facebook" | "instagram" | "linkedin" | "x") {
+  const now = network === "linkedin" ? "Now" : network === "x" ? "now" : "Just now";
+  if (!when || Math.abs(when.getTime() - Date.now()) < 60_000) return now;
+  const past = when.getTime() < Date.now();
+  if (network === "google") return past ? `${formatDistanceToNowStrict(when)} ago` : format(when, "MMM d");
+  if (network === "facebook") return format(when, when.getFullYear() === new Date().getFullYear() ? "MMMM d 'at' h:mm a" : "MMMM d, yyyy");
+  if (network === "instagram") return format(when, when.getFullYear() === new Date().getFullYear() ? "MMMM d" : "MMMM d, yyyy");
+  if (network === "linkedin" && past) {
+    const mins = Math.round((Date.now() - when.getTime()) / 60_000);
+    return mins < 60 ? `${mins}m` : mins < 1440 ? `${Math.round(mins / 60)}h` : mins < 10_080 ? `${Math.round(mins / 1440)}d` : mins < 43_200 ? `${Math.round(mins / 10_080)}w` : `${Math.round(mins / 43_200)}mo`;
+  }
+  return format(when, when.getFullYear() === new Date().getFullYear() ? "MMM d" : "MMM d, yyyy");
+}
+
 export function GooglePreview({ draft, account, when }: { draft: PostDraft; account: PreviewAccount; when: Date | null }) {
   const g = draft.google;
   const text = channelText(draft, "google");
   const img = channelMedia(draft.media, "google")[0];
-  const time = when && when.getTime() > Date.now() + 60_000 ? format(when, "MMM d") : "Just now";
+  const time = postTime(when, "google");
   const cta = g.type !== "offer" && g.cta.type !== "none" ? g.cta.type : null;
   return (
     <article className="overflow-hidden rounded-xl border border-[#DADCE0] bg-white font-[Roboto,Arial,sans-serif] text-[14px] leading-5 text-[#202124]">
@@ -178,7 +196,7 @@ export function GooglePreview({ draft, account, when }: { draft: PostDraft; acco
       </header>
       <div className="px-4">
         {img ? (
-          <img src={img.url} alt={img.alt ?? ""} className="aspect-[4/3] w-full rounded-lg bg-[#F1F3F4] object-cover" />
+          <img referrerPolicy="no-referrer" src={img.url} alt={img.alt ?? ""} className="aspect-[4/3] w-full rounded-lg bg-[#F1F3F4] object-cover" />
         ) : g.type !== "update" ? null : (
           <div className="flex aspect-[4/3] w-full items-center justify-center rounded-lg bg-[#F1F3F4] text-[12px] text-[#70757A]">No photo</div>
         )}
@@ -282,7 +300,7 @@ export function FacebookPreview({ draft, account, when, device }: { draft: PostD
   const media = channelMedia(draft.media, "facebook");
   const link = draft.facebook.link.trim();
   const shown = link && media.length ? `${text}${text ? "\n\n" : ""}${link}` : text;
-  const time = when && when.getTime() > Date.now() + 60_000 ? format(when, "MMMM d 'at' h:mm a") : "Just now";
+  const time = postTime(when, "facebook");
   const comment = draft.facebook.first_comment.trim();
   const action = "flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-[15px] font-semibold text-[#65676B]";
   return (
@@ -381,7 +399,7 @@ export function InstagramPreview({ draft, account, when, aspect }: { draft: Post
   const i = Math.min(idx, Math.max(0, media.length - 1));
   const text = channelText(draft, "instagram");
   const comment = draft.instagram.first_comment.trim();
-  const time = when && when.getTime() > Date.now() + 60_000 ? format(when, "MMMM d") : "Just now";
+  const time = postTime(when, "instagram");
   const box = aspect === "4:5" ? "aspect-[4/5]" : "aspect-square";
   const icon = "h-6 w-6 text-[#000]";
   const user = <span className="font-semibold">{account.handle}</span>;
@@ -471,7 +489,7 @@ export function LinkedInPreview({ draft, account, when }: { draft: PostDraft; ac
   const media = channelMedia(draft.media, "linkedin");
   const video = draft.media.find((m) => m.type === "video");
   const shown = video && !text.includes(video.url) ? `${text}${text ? "\n\n" : ""}${video.url}` : text;
-  const time = when && when.getTime() > Date.now() + 60_000 ? format(when, "MMM d") : "Now";
+  const time = postTime(when, "linkedin");
   const action = "flex h-10 flex-1 items-center justify-center gap-1.5 rounded text-[14px] font-semibold text-[#666666]";
   return (
     <article
@@ -500,7 +518,7 @@ export function LinkedInPreview({ draft, account, when }: { draft: PostDraft; ac
               key={m.url}
               className={cn("relative bg-[#F3F2EF]", media.length === 1 ? "aspect-[1.91/1]" : "aspect-square", media.length === 3 && i === 0 && "col-span-2 aspect-[1.91/1]")}
             >
-              <img src={m.url} alt={m.alt || ""} className="h-full w-full object-cover" />
+              <img referrerPolicy="no-referrer" src={m.url} alt={m.alt || ""} className="h-full w-full object-cover" />
               {i === 3 && media.length > 4 && (
                 <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-2xl font-semibold text-white">+{media.length - 4}</span>
               )}
@@ -541,7 +559,7 @@ export function XPreview({ draft, account, when }: { draft: PostDraft; account: 
   const media = channelMedia(draft.media, "x");
   const video = draft.media.find((m) => m.type === "video");
   const shown = video && !text.includes(video.url) ? `${text}${text ? "\n\n" : ""}${video.url}` : text;
-  const time = when && when.getTime() > Date.now() + 60_000 ? format(when, "MMM d") : "now";
+  const time = postTime(when, "x");
   const over = [...text].length > 280;
   const action = "flex items-center gap-1.5 text-[13px] text-[#536471]";
   return (
@@ -562,7 +580,7 @@ export function XPreview({ draft, account, when }: { draft: PostDraft; account: 
           {media.length > 0 && (
             <div className={cn("mt-3 grid gap-0.5 overflow-hidden rounded-2xl border border-[#CFD9DE]", media.length > 1 && "grid-cols-2")}>
               {media.map((m, i) => (
-                <img
+                <img referrerPolicy="no-referrer"
                   key={i}
                   src={m.url}
                   alt={m.alt ?? ""}

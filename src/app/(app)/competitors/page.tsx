@@ -1,6 +1,8 @@
 import { after } from "next/server";
 import { CompetitorsBoard } from "@/components/competitors/competitors-board";
 import { refreshCompetitors } from "@/lib/competitor-refresh";
+import { resolveTenant } from "@/lib/gbp/tenancy";
+import { runInTenant } from "@/lib/gbp/tenant-context";
 import { reviewHistory } from "@/lib/competitors";
 import { getProvider } from "@/lib/gbp";
 import { resolveLocation } from "@/lib/location";
@@ -12,7 +14,9 @@ export default async function CompetitorsPage({ searchParams }: { searchParams: 
   const provider = await getProvider();
   const [competitors, reviews] = await Promise.all([provider.listCompetitors(location.id), provider.listReviews(location.id)]);
   // Catch-up: competitors not checked in the last day are re-read after this page is sent (the next visit shows the new numbers).
-  after(() => refreshCompetitors({ locationId: location.id }).then(() => undefined));
+  // Runs after the response: pin it to this person's workspace now rather than re-reading the sign-in later.
+  const tenant = await resolveTenant();
+  after(() => (tenant ? runInTenant(tenant, () => refreshCompetitors({ locationId: location.id })) : refreshCompetitors({ locationId: location.id })).then(() => undefined));
   const rating = reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : null;
   return (
     <CompetitorsBoard

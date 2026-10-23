@@ -5,8 +5,12 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getProvider } from "@/lib/gbp";
+import { assignUserWorkspace, tenantForInvite } from "@/lib/gbp/tenancy";
+import { runInTenant } from "@/lib/gbp/tenant-context";
+import { getSessionUser } from "@/lib/current-user";
 import { channelAvailable } from "@/lib/connections";
 import { googleAuthUrl, googleOAuthConfigured } from "@/lib/google/oauth";
+import { metaAuthUrl, metaConfigured } from "@/lib/meta/oauth";
 import type { BusinessCategory, ConnectionOption, ReviewPatch, ReviewRequestStatus, SearchConsoleProperty, StarRating, Task } from "@/lib/gbp/types";
 import { auditLocation } from "@/lib/audit";
 import { isMapsUrl, resolveMapsLink, type MapsLinkInfo } from "@/lib/maps-link";
@@ -245,6 +249,8 @@ const profileSchema = z
     websiteUri: url("website address"),
     appointmentUri: url("booking link"),
     socialProfiles: z.partialRecord(z.enum(["facebook", "instagram", "linkedin", "pinterest", "tiktok", "x", "youtube"]), url("profile link")),
+    // Live: Google attribute values by attribute id (the provider checks them against the profile's attribute list).
+    attributeValues: z.record(z.string().regex(/^[a-z0-9_]{1,100}$/), z.union([z.boolean(), z.string().max(2000), z.array(z.string().max(200)).max(50)])),
     // Location
     address: z.string().trim().min(1, "Enter the address").max(250),
     postalAddress: z
@@ -415,8 +421,10 @@ export async function deletePhoto(locationId: string, photoId: string): Promise<
 
 // ---------------------------------------------------------------- Google Search Console (Settings → Data sources)
 /** Demo simulates the Google sign-in; live mode needs the Google OAuth app (plus the webmasters.readonly scope). */
-export async function connectSearchConsole(): Promise<ActionResult> {
+export async function connectSearchConsole(): Promise<ActionResult & { redirect?: string }> {
   try {
+    // Real Google OAuth client: Google's consent page for read-only Search Console access, back to Settings with the website picker open.
+    if (googleOAuthConfigured()) return { ok: true, id: "search_console", redirect: await googleAuthUrl("searchconsole", "/settings?pick=searchconsole#search-console") };
     if (!channelAvailable("google")) return { ok: false, error: "Google sign-in isn't set up for this app yet" };
     await (await getProvider()).connectSearchConsole();
     revalidatePath("/", "layout");
@@ -469,6 +477,8 @@ export async function connectChannel(channel: Channel): Promise<ActionResult & {
     const ch = channelSchema.parse(channel);
     // Real Google OAuth client configured: send the browser to Google's consent page (back at "/" → Settings).
     if (ch === "google" && googleOAuthConfigured()) return { ok: true, id: ch, redirect: await googleAuthUrl("gbp", "/settings?tab=accounts") };
+    // Real Meta app configured: Facebook's sign-in (Facebook Login for Business), back at /api/oauth/meta/callback → Settings.
+    if ((ch === "facebook" || ch === "instagram") && metaConfigured()) return { ok: true, id: ch, redirect: await metaAuthUrl(ch, "/settings?tab=accounts") };
     if (!channelAvailable(ch)) return { ok: false, error: `${CONNECT_LABEL[ch]} isn't set up for this app yet` };
     const c = await (await getProvider()).connectChannel(ch);
     revalidatePath("/", "layout");
@@ -632,14 +642,22 @@ export async function resendInvite(id: string): Promise<ActionResult & { token?:
 /** From the invite link. Demo: no sign-in step; live: requires signing in with the invited email. */
 export async function acceptInvite(token: string): Promise<ActionResult> {
   try {
-    const m = await (
-      await getProvider()
-    ).acceptInvite(
-      z
-        .string()
-        .regex(/^[a-f0-9]{16,64}$/)
-        .parse(token),
-    );
+    const t = z
+      .string()
+      .regex(/^[a-f0-9]{16,64}$/)
+      .parse(token);
+    const tenant = tenantForInvite(t);
+    if (!tenant) return { ok: false, error: "This invite link is no longer valid" };
+    const m = await runInTenant(tenant, async () => {
+      const provider = await getProvider();
+      const invite = await provider.findInvite(t);
+      // With sign-in on, only the invited email can join (their workspace switches to this one).
+      const user = await getSessionUser();
+      if (user && invite && user.email.toLowerCase() !== invite.email.toLowerCase()) throw new Error(`Sign in as ${invite.email} to accept this invite`);
+      const accepted = await provider.acceptInvite(t);
+      if (user) assignUserWorkspace(user.email, tenant.id);
+      return accepted;
+    });
     revalidatePath("/", "layout");
     return { ok: true, id: m.id };
   } catch (e) {
@@ -965,7 +983,7 @@ export async function trackOffer(offerId: string, event: "view" | "click"): Prom
 export async function dismissOffer(offerId: string): Promise<void> {
   if (typeof offerId !== "string" || !offerId) return;
   // TODO: the signed-in member's workspace once multi-workspace sign-in lands.
-  closeOffer(currentWorkspaceId(), offerId.slice(0, 200));
+  closeOffer(await currentWorkspaceId(), offerId.slice(0, 200));
   revalidatePath("/dashboard");
   revalidatePath("/admin/offers");
 }
@@ -1017,7 +1035,7 @@ export async function requestMeetingCancel(leadId: string, reason = ""): Promise
   try {
     const lead = await getLead(z.string().min(1).parse(leadId));
     // TODO: check the lead belongs to the signed-in member's workspace once multi-workspace sign-in lands.
-    if (!lead || lead.workspaceId !== currentWorkspaceId()) return { ok: false, error: "Meeting not found" };
+    if (!lead || lead.workspaceId !== (await currentWorkspaceId())) return { ok: false, error: "Meeting not found" };
     if (lead.status !== "booked") return { ok: false, error: "This meeting can't be cancelled any more" };
     const why = z.string().trim().max(500).parse(reason);
     // One open request at a time: asking to cancel replaces a pending time change.
@@ -1033,7 +1051,7 @@ export async function requestMeetingCancel(leadId: string, reason = ""): Promise
 /** The client closed the meeting reminder on their Dashboard. */
 export async function closeMeetingReminder(leadId: string): Promise<void> {
   const lead = await getLead(String(leadId).slice(0, 200));
-  if (!lead || lead.workspaceId !== currentWorkspaceId()) return;
+  if (!lead || lead.workspaceId !== (await currentWorkspaceId())) return;
   updateLead(lead.id, { reminderClosedAt: new Date().toISOString() });
 }
 
@@ -1041,7 +1059,7 @@ export async function closeMeetingReminder(leadId: string): Promise<void> {
 export async function requestMeetingTime(leadId: string, input: { meetingAt: string; note: string }): Promise<ActionResult> {
   try {
     const lead = await getLead(z.string().min(1).parse(leadId));
-    if (!lead || lead.workspaceId !== currentWorkspaceId()) return { ok: false, error: "Meeting not found" };
+    if (!lead || lead.workspaceId !== (await currentWorkspaceId())) return { ok: false, error: "Meeting not found" };
     if (lead.status !== "booked") return { ok: false, error: "This meeting can't be changed any more" };
     const r = z.object({ meetingAt: z.string().datetime({ message: "Pick a date and time" }), note: z.string().trim().max(500) }).parse(input);
     const at = new Date(r.meetingAt);
@@ -1062,7 +1080,7 @@ export async function requestMeetingTime(leadId: string, input: { meetingAt: str
 export async function withdrawMeetingRequest(leadId: string): Promise<ActionResult> {
   try {
     const lead = await getLead(z.string().min(1).parse(leadId));
-    if (!lead || lead.workspaceId !== currentWorkspaceId()) return { ok: false, error: "Meeting not found" };
+    if (!lead || lead.workspaceId !== (await currentWorkspaceId())) return { ok: false, error: "Meeting not found" };
     updateLead(lead.id, { changeRequest: null, cancelRequest: null });
     revalidatePath("/dashboard");
     revalidatePath("/admin", "layout");

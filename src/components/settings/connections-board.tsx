@@ -75,9 +75,13 @@ export function ConnectionsBoard({
   // Back from Google's consent page: pick the Business Profile locations to manage.
   useOAuthReturn(
     useCallback((what: string) => {
-      if (what !== "google") return;
-      toast.success("Google account connected", { description: "Choose the Business Profiles to manage." });
-      setPicker("google");
+      if (what === "google") {
+        toast.success("Google account connected", { description: "Choose the Business Profiles to manage." });
+        setPicker("google");
+      } else if (what === "facebook" || what === "instagram") {
+        toast.success("Facebook connected", { description: what === "facebook" ? "Choose the Page to post to." : "Choose the Instagram account to post to." });
+        setPicker(what);
+      }
     }, []),
   );
   const byId = Object.fromEntries(connections.map((c) => [c.channel, c])) as Partial<Record<Channel, Connection>>;

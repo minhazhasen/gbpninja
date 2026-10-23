@@ -29,11 +29,14 @@ export function SearchConsoleBoard({
   location,
   connection,
   report,
+  error,
   canConnect,
 }: {
   location: { id: string; title: string };
   connection: SearchConsoleConnection;
   report: SearchConsoleReport | null;
+  /** Google refused the report (shown instead of the data). */
+  error?: string | null;
   /** Google sign-in is set up (or demo). */
   canConnect: boolean;
 }) {
@@ -58,6 +61,7 @@ export function SearchConsoleBoard({
   const connect = async () => {
     setConnecting(true);
     const res = await connectSearchConsole();
+    if (res.ok && res.redirect) return void window.location.assign(res.redirect);
     setConnecting(false);
     if (!res.ok) return void toast.error(res.error);
     toast.success("Google Search Console connected");
@@ -75,6 +79,24 @@ export function SearchConsoleBoard({
       )}
     </PageHeader>
   );
+
+  if (connected && error) {
+    return (
+      <div className="space-y-5 pb-8">
+        {header}
+        <Card className="flex flex-col items-center px-6 py-14 text-center">
+          <span className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-background">
+            <SearchConsoleIcon className="h-8 w-8" />
+          </span>
+          <h2 className="mt-4 text-lg font-semibold tracking-tight">Couldn&apos;t load Search Console</h2>
+          <p className="mt-1.5 max-w-md text-sm text-muted-foreground">{error}</p>
+          <Link href="/settings#search-console" className={buttonClass("outline", "default", "mt-5")}>
+            Open Search Console settings
+          </Link>
+        </Card>
+      </div>
+    );
+  }
 
   if (!connected || !report) {
     return (

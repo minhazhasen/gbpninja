@@ -23,13 +23,13 @@ import {
 } from "@dnd-kit/core";
 import { addMonths, addWeeks, format, isSameDay, isSameMonth, isToday, parseISO, startOfMonth } from "date-fns";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, GripVertical, Plus, Search } from "lucide-react";
+import { ArrowDownToLine, ChevronLeft, ChevronRight, GripVertical, Plus, Search } from "lucide-react";
 import { Card, StatStrip, buttonClass, inputClass } from "@/components/ui";
 import { Segmented } from "@/components/ui-client";
 import { ChannelStack } from "@/components/marketing/channel-icon";
 import { PostComposer, type ComposerLocation } from "@/components/marketing/post-composer";
 import { reschedulePost } from "@/app/(app)/actions";
-import { MOVABLE, POST_STATUS, monthGrid, postDate, weekDays, type Channel, type Post, type PostStatus } from "@/lib/posts";
+import { MOVABLE, POST_STATUS, monthGrid, postDate, postEngagement, weekDays, type Channel, type Post, type PostStatus } from "@/lib/posts";
 import { cn } from "@/lib/utils";
 
 type View = "week" | "month" | "list";
@@ -282,7 +282,7 @@ export function ContentBoard({
                     <ul className="space-y-1.5 px-2 pb-3">
                       {items.map((p) => (
                         <li key={p.id}>
-                          <DragChip post={p} onClick={() => open(p)} />
+                          <DragChip post={p} onClick={() => open(p)} variant="card" />
                         </li>
                       ))}
                     </ul>
@@ -333,7 +333,7 @@ function DayDrop({ day, className, children }: { day: Date; className?: string; 
 }
 
 /** Drafts and scheduled posts can be dragged to another day; others behave like a normal chip. */
-function DragChip({ post, onClick }: { post: Post; onClick: () => void }) {
+function DragChip({ post, onClick, variant }: { post: Post; onClick: () => void; variant?: "card" | "compact" }) {
   const movable = MOVABLE.includes(post.status);
   const { setNodeRef, attributes, listeners, isDragging } = useDraggable({ id: post.id, disabled: !movable });
   return (
@@ -343,7 +343,7 @@ function DragChip({ post, onClick }: { post: Post; onClick: () => void }) {
       {...(movable ? listeners : {})}
       className={cn("touch-manipulation transition-opacity duration-150", movable && "cursor-grab active:cursor-grabbing", isDragging && "opacity-30")}
     >
-      <PostChip post={post} onClick={onClick} movable={movable} />
+      <PostChip post={post} onClick={onClick} movable={movable} variant={variant} />
     </div>
   );
 }
@@ -361,23 +361,97 @@ function AddButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function PostChip({ post, onClick, movable }: { post: Post; onClick: () => void; movable?: boolean }) {
+/** 1240 → "1.2k". */
+const compact = (n: number) => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+
+/** First image of a post (Google photos need no-referrer, see CLAUDE.md). */
+const thumbOf = (p: Post) => p.media.find((m) => m.type === "image")?.url ?? null;
+/** The post's text; the title only when it isn't just the start of the text (imported posts use the text as title). */
+const titleOf = (p: Post) => {
+  const t = (p.title || "").trim();
+  return t && !p.body.trim().startsWith(t.replace(/…$/, "")) ? t : null;
+};
+
+/** Square thumbnail of the post's first image, or a neutral tile with its main channel. */
+function PostThumb({ post, className }: { post: Post; className?: string }) {
+  const thumb = thumbOf(post);
+  return thumb ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img referrerPolicy="no-referrer" src={thumb} alt="" loading="lazy" className={cn("shrink-0 rounded-md border bg-muted object-cover", className)} />
+  ) : (
+    <span className={cn("flex shrink-0 items-center justify-center rounded-md border bg-muted/50", className)}>
+      <ChannelStack channels={post.channels.slice(0, 1)} size="h-4 w-4" />
+    </span>
+  );
+}
+
+/**
+ * A post in the calendar. "compact" (month): thumbnail + title + time. "card" (week): image, text preview, time and channels.
+ */
+function PostChip({ post, onClick, movable, variant = "compact" }: { post: Post; onClick: () => void; movable?: boolean; variant?: "card" | "compact" }) {
   const st = POST_STATUS[post.status];
+  const thumb = thumbOf(post);
+  const title = titleOf(post);
+  const text = post.body.trim() || post.title || "Untitled";
+  const meta = (
+    <span className="flex items-center justify-between gap-1">
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", st.dot)} aria-label={st.label} />
+        <span className="truncate tabular-nums text-muted-foreground">{format(parseISO(postDate(post)), "h:mma").toLowerCase()}</span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1">
+        {post.imported && <ArrowDownToLine className="h-3 w-3 text-muted-foreground" aria-label="Posted outside the app" />}
+        <ChannelStack channels={post.channels} size="h-3 w-3" />
+      </span>
+    </span>
+  );
+  const tip = `${title ?? text.slice(0, 80)} · ${st.label}${post.imported ? " · posted outside the app" : ""}${movable ? " · drag to reschedule" : ""}`;
+
+  if (variant === "card")
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        title={tip}
+        className="group/chip flex w-full min-w-0 flex-col overflow-hidden rounded-lg border bg-card text-left text-xs transition-colors hover:border-primary/40 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {thumb && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img referrerPolicy="no-referrer" src={thumb} alt="" loading="lazy" className="aspect-[4/3] w-full bg-muted object-cover" />
+        )}
+        <span className="flex min-w-0 flex-col gap-1.5 px-2 py-2">
+          {title && <span className="truncate font-semibold">{title}</span>}
+          <span className={cn("line-clamp-3 break-words leading-snug", title ? "text-muted-foreground" : "text-foreground")}>{text}</span>
+          {meta}
+        </span>
+      </button>
+    );
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group/chip flex w-full min-w-0 flex-col gap-1 rounded-md border bg-card px-2 py-1.5 text-left text-xs transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      title={`${post.title || "Untitled"} · ${st.label}${movable ? " · drag to reschedule" : ""}`}
+      title={tip}
+      className="group/chip flex w-full min-w-0 items-center gap-1.5 rounded-md border bg-card p-1 pr-2 text-left text-xs transition-colors hover:border-primary/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", st.dot)} aria-label={st.label} />
-        <span className="min-w-0 flex-1 truncate font-semibold">{post.title || post.body || "Untitled"}</span>
-        {movable && <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 group-hover/chip:opacity-100" />}
-      </span>
-      <span className="flex items-center justify-between gap-1 pl-3">
-        <span className="truncate tabular-nums text-muted-foreground">{format(parseISO(postDate(post)), "h:mma").toLowerCase()}</span>
-        <ChannelStack channels={post.channels} size="h-3 w-3" />
+      {thumb ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img referrerPolicy="no-referrer" src={thumb} alt="" loading="lazy" className="h-8 w-8 shrink-0 rounded bg-muted object-cover" />
+      ) : (
+        <span className={cn("ml-1 h-1.5 w-1.5 shrink-0 rounded-full", st.dot)} aria-label={st.label} />
+      )}
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="min-w-0 flex-1 truncate font-semibold">{title ?? text}</span>
+          {movable && <GripVertical className="h-3 w-3 shrink-0 text-muted-foreground opacity-0 group-hover/chip:opacity-100" />}
+        </span>
+        <span className="flex items-center justify-between gap-1">
+          <span className="truncate tabular-nums text-muted-foreground">{format(parseISO(postDate(post)), "h:mma").toLowerCase()}</span>
+          <span className="flex shrink-0 items-center gap-1">
+            {post.imported && <ArrowDownToLine className="h-3 w-3 text-muted-foreground" aria-label="Posted outside the app" />}
+            <ChannelStack channels={post.channels} size="h-3 w-3" />
+          </span>
+        </span>
       </span>
     </button>
   );
@@ -531,11 +605,19 @@ function ListView({
           <ul className="divide-y md:hidden">
             {rows.map((p) => (
               <li key={p.id}>
-                <button type="button" onClick={() => onOpen(p)} className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/40">
-                  <ChannelStack channels={p.channels} className="w-11" />
+                <button type="button" onClick={() => onOpen(p)} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-muted/40">
+                  <PostThumb post={p} className="h-14 w-14" />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-semibold">{p.title || p.body || "Untitled"}</span>
-                    <span className="block truncate text-xs text-muted-foreground">{format(parseISO(postDate(p)), "EEE d MMM, h:mm a")}</span>
+                    {titleOf(p) && <span className="block truncate font-semibold">{titleOf(p)}</span>}
+                    <span className={cn("line-clamp-2 text-sm", titleOf(p) && "text-muted-foreground")}>{p.body || p.title || "Untitled"}</span>
+                    <span className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <ChannelStack channels={p.channels} size="h-3 w-3" />
+                      <span className="truncate">
+                        {format(parseISO(postDate(p)), "EEE d MMM, h:mm a")}
+                        {p.imported && " · Imported"}
+                        {postEngagement(p) && ` · ${compact(postEngagement(p)!.engagements)} engagements`}
+                      </span>
+                    </span>
                   </span>
                   <StatusLabel status={p.status} />
                 </button>
@@ -543,11 +625,19 @@ function ListView({
             ))}
           </ul>
           <div className="hidden md:block">
-            <table className="w-full text-sm">
+            <table className="w-full table-fixed text-sm">
+              <colgroup>
+                <col />
+                <col className="w-28" />
+                <col className="w-32" />
+                <col className="w-40" />
+                <col className="w-44" />
+                <col className="w-32" />
+              </colgroup>
               <thead className="border-b text-left">
                 <tr>
-                  {["Post", "Channels", "Campaign", "Date", "Status"].map((h, i) => (
-                    <th key={h} className={cn("label-caps px-3 py-3 font-semibold", i === 0 && "pl-5", i === 4 && "pr-5")}>
+                  {["Post", "Channels", "Campaign", "Date", "Performance", "Status"].map((h, i) => (
+                    <th key={h} className={cn("label-caps px-3 py-3 font-semibold", i === 0 && "pl-5", i === 5 && "pr-5")}>
                       {h}
                     </th>
                   ))}
@@ -556,15 +646,34 @@ function ListView({
               <tbody className="divide-y">
                 {rows.map((p) => (
                   <tr key={p.id} onClick={() => onOpen(p)} className="cursor-pointer transition-colors hover:bg-muted/40">
-                    <td className="max-w-0 py-3 pl-5 pr-3">
-                      <p className="truncate font-semibold">{p.title || "Untitled"}</p>
-                      <p className="truncate text-xs text-muted-foreground">{p.body}</p>
+                    <td className="py-3 pl-5 pr-3">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <PostThumb post={p} className="h-14 w-14" />
+                        <div className="min-w-0 flex-1">
+                          {titleOf(p) && <p className="truncate font-semibold">{titleOf(p)}</p>}
+                          <p className={cn("line-clamp-2", titleOf(p) ? "text-xs text-muted-foreground" : "text-sm")}>{p.body || p.title || "Untitled"}</p>
+                          {p.imported && <span className="mt-1 inline-block rounded-full bg-muted px-1.5 py-px text-[10px] font-semibold text-muted-foreground">Imported</span>}
+                        </div>
+                      </div>
                     </td>
                     <td className="px-3 py-3">
                       <ChannelStack channels={p.channels} />
                     </td>
-                    <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{p.label || "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{format(parseISO(postDate(p)), "EEE d MMM yyyy, h:mm a")}</td>
+                    <td className="truncate px-3 py-3 text-xs text-muted-foreground">{p.label || "—"}</td>
+                    <td className="px-3 py-3 text-xs text-muted-foreground">
+                      <span className="block whitespace-nowrap">{format(parseISO(postDate(p)), "EEE d MMM yyyy")}</span>
+                      <span className="block whitespace-nowrap">{format(parseISO(postDate(p)), "h:mm a")}</span>
+                    </td>
+                    <td className="whitespace-nowrap px-3 py-3 text-xs">
+                      {postEngagement(p) ? (
+                        <span>
+                          <span className="font-semibold tabular-nums">{compact(postEngagement(p)!.views)}</span> <span className="text-muted-foreground">views ·</span>{" "}
+                          <span className="font-semibold tabular-nums">{compact(postEngagement(p)!.engagements)}</span> <span className="text-muted-foreground">engagements</span>
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-3 pr-5">
                       <StatusLabel status={p.status} />
                     </td>

@@ -138,9 +138,20 @@ export function ProfilePreview({
   const hero = photos.find((p) => p.category === "cover") ?? gallery[0];
   const thumbs = gallery.filter((p) => p !== hero);
   const socials = SOCIAL_NETWORKS.filter((n) => l.socialProfiles?.[n.id]);
+  // Live: Google's own groups and labels; like Google, only what the business has ("No" answers aren't listed).
+  const defs = new Map((l.attributeCatalog ?? []).map((d) => [d.id, d]));
+  const labelOf = (a: string) => {
+    const d = defs.get(a);
+    if (!d) return attributeLabel(a);
+    const v = l.attributeValues?.[a];
+    if (d.type === "enum") return `${d.label}: ${d.options?.find((o) => o.value === v)?.label ?? String(v)}`;
+    if (d.type === "repeated_enum") return `${d.label}: ${((v as string[]) ?? []).map((x) => d.options?.find((o) => o.value === x)?.label ?? x).join(", ")}`;
+    return d.label;
+  };
+  const shownAttrs = l.attributes.filter((a) => !defs.size || l.attributeValues?.[a] !== false);
   const attrGroups = Object.entries(
-    l.attributes.reduce<Record<string, string[]>>((m, a) => {
-      (m[attributeGroup(a)] ??= []).push(a);
+    shownAttrs.reduce<Record<string, string[]>>((m, a) => {
+      (m[defs.get(a)?.group ?? attributeGroup(a)] ??= []).push(a);
       return m;
     }, {}),
   );
@@ -170,16 +181,16 @@ export function ProfilePreview({
               <div className="grid h-36 grid-cols-[2fr_1fr] gap-0.5 bg-border">
                 <button type="button" onClick={() => onGo("photos")} className="relative flex items-center justify-center overflow-hidden bg-muted">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  {hero ? <img src={hero.url} alt="" className="absolute inset-0 h-full w-full object-cover" /> : <span className="rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-primary shadow-sm">+ Add cover photo</span>}
+                  {hero ? <img referrerPolicy="no-referrer" src={hero.url} alt="" className="absolute inset-0 h-full w-full object-cover" /> : <span className="rounded-full bg-card px-2.5 py-1 text-[11px] font-medium text-primary shadow-sm">+ Add cover photo</span>}
                 </button>
                 <span className="grid grid-rows-2 gap-0.5">
                   <span className="relative flex items-center justify-center overflow-hidden bg-muted/80">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {thumbs[0] ? <img src={thumbs[0].url} alt="" className="absolute inset-0 h-full w-full object-cover" /> : <ImageIcon className="h-4 w-4 text-muted-foreground/60" />}
+                    {thumbs[0] ? <img referrerPolicy="no-referrer" src={thumbs[0].url} alt="" className="absolute inset-0 h-full w-full object-cover" /> : <ImageIcon className="h-4 w-4 text-muted-foreground/60" />}
                   </span>
                   <span className="relative flex items-center justify-center overflow-hidden bg-muted/80 text-[11px] font-medium text-muted-foreground">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    {thumbs[1] && <img src={thumbs[1].url} alt="" className="absolute inset-0 h-full w-full object-cover brightness-50" />}
+                    {thumbs[1] && <img referrerPolicy="no-referrer" src={thumbs[1].url} alt="" className="absolute inset-0 h-full w-full object-cover brightness-50" />}
                     <span className={cn("relative", thumbs[1] && "text-white")}>{l.photoCount ? `${l.photoCount} photos` : "No photos"}</span>
                   </span>
                 </span>
@@ -195,7 +206,7 @@ export function ProfilePreview({
               <div className="px-4 pb-2 pt-3">
                 <p className="flex items-start gap-2 text-[19px] leading-tight">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  {logo && <img src={logo.url} alt="" className="mt-0.5 h-6 w-6 shrink-0 rounded-md object-cover" />}
+                  {logo && <img referrerPolicy="no-referrer" src={logo.url} alt="" className="mt-0.5 h-6 w-6 shrink-0 rounded-md object-cover" />}
                   <span>{l.title}</span>
                 </p>
                 <p className="mt-1 flex flex-wrap items-center gap-1 text-[13px] text-muted-foreground">
@@ -211,7 +222,7 @@ export function ProfilePreview({
                 </p>
                 <p className="mt-0.5 flex items-center gap-1 text-[13px] text-muted-foreground">
                   {l.primaryCategory}
-                  {l.attributes.includes("wheelchair_accessible_entrance") && (
+                  {(l.attributes.includes("wheelchair_accessible_entrance") || l.attributeValues?.has_wheelchair_accessible_entrance === true) && (
                     <>
                       <span>·</span>
                       <Accessibility className="h-3.5 w-3.5" aria-label="Wheelchair accessible" />
@@ -383,7 +394,7 @@ export function ProfilePreview({
                         <div key={p.name} className="overflow-hidden rounded-xl border">
                           <div className="flex aspect-square items-center justify-center bg-muted">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            {p.photo ? <img src={p.photo} alt="" className="h-full w-full object-cover" /> : <Package className="h-6 w-6 text-muted-foreground/60" />}
+                            {p.photo ? <img referrerPolicy="no-referrer" src={p.photo} alt="" className="h-full w-full object-cover" /> : <Package className="h-6 w-6 text-muted-foreground/60" />}
                           </div>
                           <div className="px-2 py-1.5">
                             <p className="line-clamp-2 text-[12px] leading-snug">{p.name}</p>
@@ -427,7 +438,7 @@ export function ProfilePreview({
                           {ids.map((a) => (
                             <li key={a} className="flex items-center gap-2 text-[13px]">
                               <Check className="h-3.5 w-3.5 shrink-0 text-success" />
-                              {attributeLabel(a)}
+                              {labelOf(a)}
                             </li>
                           ))}
                         </ul>

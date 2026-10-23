@@ -58,7 +58,7 @@ export function gbpErrorMessage(e: unknown) {
     return "Google hasn't approved Business Profile API access for this Cloud project yet (quota is 0). Request access in Google's GBP API form, then try again.";
   if (e.code === 403 && /has not been used|is disabled|SERVICE_DISABLED/i.test(e.message))
     return "Turn on the “My Business Account Management API” and “My Business Business Information API” in your Google Cloud project, then try again.";
-  if (e.code === 403) return "This Google account can't manage Business Profiles, or access was not granted.";
+  if (e.code === 403) return `Google refused access (${e.status || "permission denied"}). You need to be an Owner or Manager of this profile, and it must be verified.`;
   if (e.code === 401) return "Google access expired. Disconnect and connect again.";
   return e.message;
 }

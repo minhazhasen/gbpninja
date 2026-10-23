@@ -5,6 +5,7 @@ import { ChartLegend, MetricsChart } from "@/components/metrics-chart";
 import { Avatar, Badge, Card, PageHeader, PanelHeader, SectionLink, Stars, StatStrip } from "@/components/ui";
 import { auditLocation } from "@/lib/audit";
 import { getProvider } from "@/lib/gbp";
+import { SyncIssues } from "@/components/sync-issues";
 import { resolveLocation } from "@/lib/location";
 import { PerformanceControls } from "@/components/performance/performance-controls";
 import { rangeFromParams, rangeLabel, rangeToParams } from "@/lib/date-ranges";
@@ -28,8 +29,9 @@ export default async function DashboardPage({ searchParams }: Props) {
     provider.getMetrics(location.id, daysNeeded(range)),
     provider.listReviews(location.id),
     provider.listPosts(),
-    getWorkspace(currentWorkspaceId()),
+    getWorkspace((await currentWorkspaceId())),
   ]);
+  const issues = (await provider.getSyncIssues?.([location.id])) ?? [];
   // A booked meeting with the platform team (from an offer) replaces the offer card until it's over. Its reminder can be closed;
   // it comes back 1 hour before the meeting or when a new Meet link is sent.
   // Otherwise the live offer: shown from 7 days after sign-up (per offer),
@@ -52,10 +54,34 @@ export default async function DashboardPage({ searchParams }: Props) {
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
   const tasks = [
-    unreplied.length > 0 && { icon: MessageSquareText, title: `Reply to ${unreplied.length} review${unreplied.length === 1 ? "" : "s"}`, sub: "Unanswered reviews on Google", href: to("/reviews", { filter: "unreplied" }), tone: "text-warning bg-warning/10" },
-    failed.length > 0 && { icon: CalendarDays, title: `${failed.length} post${failed.length === 1 ? "" : "s"} failed to publish`, sub: "Retry the failed channels", href: to("/calendar", { post: failed[0]?.id ?? "" }), tone: "text-destructive bg-destructive/10" },
-    audit.issues.length > 0 && { icon: ClipboardCheck, title: `Fix ${audit.issues.length} profile issue${audit.issues.length === 1 ? "" : "s"}`, sub: `Profile score ${audit.score}/100`, href: to("/audit"), tone: "text-accent-foreground bg-accent" },
-    upcoming.length === 0 && { icon: CalendarDays, title: "Schedule your next post", sub: "Post weekly to stay fresh", href: to("/calendar", { compose: "1" }), tone: "text-accent-foreground bg-accent" },
+    unreplied.length > 0 && {
+      icon: MessageSquareText,
+      title: `Reply to ${unreplied.length} review${unreplied.length === 1 ? "" : "s"}`,
+      sub: "Unanswered reviews on Google",
+      href: to("/reviews", { filter: "unreplied" }),
+      tone: "text-warning bg-warning/10",
+    },
+    failed.length > 0 && {
+      icon: CalendarDays,
+      title: `${failed.length} post${failed.length === 1 ? "" : "s"} failed to publish`,
+      sub: "Retry the failed channels",
+      href: to("/calendar", { post: failed[0]?.id ?? "" }),
+      tone: "text-destructive bg-destructive/10",
+    },
+    audit.issues.length > 0 && {
+      icon: ClipboardCheck,
+      title: `Fix ${audit.issues.length} profile issue${audit.issues.length === 1 ? "" : "s"}`,
+      sub: `Profile score ${audit.score}/100`,
+      href: to("/audit"),
+      tone: "text-accent-foreground bg-accent",
+    },
+    upcoming.length === 0 && {
+      icon: CalendarDays,
+      title: "Schedule your next post",
+      sub: "Post weekly to stay fresh",
+      href: to("/calendar", { compose: "1" }),
+      tone: "text-accent-foreground bg-accent",
+    },
   ].filter(Boolean) as { icon: React.ElementType; title: string; sub: string; href: string; tone: string }[];
 
   return (
@@ -64,14 +90,31 @@ export default async function DashboardPage({ searchParams }: Props) {
         {location.title} · {location.primaryCategory}
       </PageHeader>
 
-      {meeting ? (
-        meetingReminderVisible(meeting) && <MeetingCard
-          // Only what the client may see (never the platform team's private notes).
-          meeting={{ id: meeting.id, offerTitle: meeting.offerTitle, meetingAt: meeting.meetingAt, meetUrl: meeting.meetSharedAt ? meeting.meetUrl : null, meetSharedAt: meeting.meetSharedAt, name: meeting.name, email: meeting.email, phone: meeting.phone, changeRequest: meeting.changeRequest ?? null, changeAnswer: meeting.changeAnswer ?? null, cancelRequest: meeting.cancelRequest ?? null, cancelAnswer: meeting.cancelAnswer ?? null }} locationId={location.id} taken={taken} />
-      ) : (
-        offer && <OfferCard offer={offer} locationId={location.id} taken={taken} me={me ? { name: me.name, email: me.email } : undefined} />
-      )}
+      {meeting
+        ? meetingReminderVisible(meeting) && (
+            <MeetingCard
+              // Only what the client may see (never the platform team's private notes).
+              meeting={{
+                id: meeting.id,
+                offerTitle: meeting.offerTitle,
+                meetingAt: meeting.meetingAt,
+                meetUrl: meeting.meetSharedAt ? meeting.meetUrl : null,
+                meetSharedAt: meeting.meetSharedAt,
+                name: meeting.name,
+                email: meeting.email,
+                phone: meeting.phone,
+                changeRequest: meeting.changeRequest ?? null,
+                changeAnswer: meeting.changeAnswer ?? null,
+                cancelRequest: meeting.cancelRequest ?? null,
+                cancelAnswer: meeting.cancelAnswer ?? null,
+              }}
+              locationId={location.id}
+              taken={taken}
+            />
+          )
+        : offer && <OfferCard offer={offer} locationId={location.id} taken={taken} me={me ? { name: me.name, email: me.email } : undefined} />}
 
+      <SyncIssues issues={issues} />
       <StatStrip
         cols={5}
         items={[
@@ -90,7 +133,13 @@ export default async function DashboardPage({ searchParams }: Props) {
             href: to("/performance", rangeQs),
           },
           { label: "Avg rating", value: avg.toFixed(1), hint: `${reviews.length} reviews`, href: to("/reviews") },
-          { label: "Needs reply", value: unreplied.length, hint: unreplied.length ? "Unanswered reviews" : "All caught up", alert: unreplied.length > 0, href: to("/reviews", { filter: "unreplied" }) },
+          {
+            label: "Needs reply",
+            value: unreplied.length,
+            hint: unreplied.length ? "Unanswered reviews" : "All caught up",
+            alert: unreplied.length > 0,
+            href: to("/reviews", { filter: "unreplied" }),
+          },
           { label: "Profile score", value: `${audit.score}`, hint: `${audit.issues.length} issues`, href: to("/audit") },
         ]}
       />
@@ -141,7 +190,7 @@ export default async function DashboardPage({ searchParams }: Props) {
           <ul className="divide-y">
             {reviews.slice(0, 4).map((r) => (
               <li key={r.id} className="flex items-start gap-3 px-5 py-3 lg:px-6">
-                <Avatar name={r.reviewer} className="h-8 w-8" />
+                <Avatar name={r.reviewer} photo={r.reviewerPhoto} className="h-8 w-8" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-semibold">{r.reviewer}</span>
@@ -149,7 +198,11 @@ export default async function DashboardPage({ searchParams }: Props) {
                   </div>
                   <p className="truncate text-sm text-muted-foreground">{r.comment}</p>
                 </div>
-                {!r.reply && <Badge variant="warning" pill>Reply</Badge>}
+                {!r.reply && (
+                  <Badge variant="warning" pill>
+                    Reply
+                  </Badge>
+                )}
               </li>
             ))}
           </ul>

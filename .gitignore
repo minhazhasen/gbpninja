@@ -50,3 +50,6 @@ prisma/*.db-journal
 *.db-shm
 *.db-wal
 *.db-journal
+
+# Public media for social posts (src/lib/public-media.ts)
+prisma/media/

@@ -216,7 +216,13 @@ export function StarBars({ counts }: { counts: Record<number, number> }) {
   );
 }
 
-export function Avatar({ name, className }: { name: string; className?: string }) {
+/** Initials, or the person's photo when there is one (Google photos need no-referrer). */
+export function Avatar({ name, photo, className }: { name: string; photo?: string | null; className?: string }) {
+  if (photo)
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- Google profile photo URLs
+      <img src={photo} alt="" referrerPolicy="no-referrer" className={cn("h-9 w-9 shrink-0 rounded-full bg-muted object-cover", className)} />
+    );
   return (
     <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground", className)}>
       {initials(name)}

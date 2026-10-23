@@ -2,6 +2,7 @@
 // Re-reads every added competitor's Google Maps profile (rating + review count) — see src/lib/competitor-refresh.ts.
 import { NextResponse } from "next/server";
 import { refreshCompetitors } from "@/lib/competitor-refresh";
+import { forEachWorkspace } from "@/lib/gbp/tenancy";
 
 export const dynamic = "force-dynamic";
 // Checks run one at a time with pauses: give the run time to finish.
@@ -16,7 +17,12 @@ function authorized(req: Request) {
 
 export async function GET(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  return NextResponse.json(await refreshCompetitors());
+  // No one is signed in here: check every workspace's competitors, each inside its own workspace.
+  const results: Record<string, Awaited<ReturnType<typeof refreshCompetitors>>> = {};
+  await forEachWorkspace(async (t) => {
+    results[t.id] = await refreshCompetitors();
+  });
+  return NextResponse.json(results);
 }
 
 export const POST = GET;

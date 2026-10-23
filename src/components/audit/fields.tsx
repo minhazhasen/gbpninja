@@ -9,7 +9,7 @@ import { Segmented, SelectBox, Switch, useConfirm } from "@/components/ui-client
 import { searchCategories } from "@/app/(app)/actions";
 import { DateField, TimeField } from "@/components/date-time-field";
 import { pointsGain, type AuditCheck, type AuditSection } from "@/lib/audit";
-import type { HoursPeriod, Location, OpenStatus, PostalAddress, ProfileSuggestions, SocialNetwork, SpecialHours, Suggestion } from "@/lib/gbp/types";
+import type { AttributeDef, AttributeValue, HoursPeriod, Location, OpenStatus, PostalAddress, ProfileSuggestions, SocialNetwork, SpecialHours, Suggestion } from "@/lib/gbp/types";
 import {
   ATTRIBUTE_GROUPS,
   COUNTRIES,
@@ -506,7 +506,7 @@ function CategoryEditor({
             <CategoryCombobox
               autoFocus
               label="Primary category"
-              placeholder="Search Google categories, e.g. Dentist"
+              placeholder="Search Google categories"
               exclude={[primary]}
               suggestions={[]}
               onPick={(name) => {
@@ -1346,6 +1346,8 @@ function MoreHoursEditor({ location, type, onDraft, onDone }: { location: Locati
 export function MoreFields({ section, ctx }: { section: AuditSection; ctx: Ctx }) {
   const { location: l, total, suggestions } = ctx;
   const e = useEditing(ctx.onFocusField);
+  // Live: Google's own attribute list for this profile and its real values — nothing from our catalogue or guessed.
+  if (l.notInApi) return <GoogleAttributeFields section={section} ctx={ctx} />;
   const suggested = new Set(suggestions.attributes.map((s) => s.name));
   return (
     <SectionCard section={section} total={total}>
@@ -1399,6 +1401,120 @@ function AttributeGroupEditor({ location, items, suggested, onDone }: { location
         ))}
       </div>
       <EditActions onCancel={onDone} busy={busy} onSave={() => commit({ attributes: [...location.attributes.filter((a) => !ids.includes(a)), ...on] }, "Attributes saved")} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- More (live: Google's attributes)
+const answerText = (d: AttributeDef, v: AttributeValue | undefined) => {
+  if (v === undefined) return null;
+  if (d.type === "bool") return v ? d.label : `${d.label}: No`;
+  if (d.type === "enum") return `${d.label}: ${d.options?.find((o) => o.value === v)?.label ?? String(v)}`;
+  if (d.type === "repeated_enum") return `${d.label}: ${(v as string[]).map((x) => d.options?.find((o) => o.value === x)?.label ?? x).join(", ")}`;
+  return `${d.label}: ${String(v)}`;
+};
+
+function GoogleAttributeFields({ section, ctx }: { section: AuditSection; ctx: Ctx }) {
+  const { location: l, total } = ctx;
+  const e = useEditing(ctx.onFocusField);
+  const defs = l.attributeCatalog ?? [];
+  const values = l.attributeValues ?? {};
+  const groups = [...new Set(defs.map((d) => d.group))].map((group) => ({ group, items: defs.filter((d) => d.group === group) }));
+  return (
+    <SectionCard section={section} total={total}>
+      <p className="px-5 py-3 text-xs text-muted-foreground lg:px-6">
+        The attributes Google offers for a {l.primaryCategory || "business"} like yours, with your answers on Google. Only add what&apos;s true.
+      </p>
+      {!groups.length && <p className="px-5 pb-4 text-sm text-muted-foreground lg:px-6">Attributes couldn&apos;t be loaded from Google yet. Reload the page to try again.</p>}
+      {groups.map((g) => {
+        const answered = g.items.filter((d) => values[d.id] !== undefined && !(Array.isArray(values[d.id]) && !(values[d.id] as string[]).length));
+        return (
+          <Field
+            key={g.group}
+            label={g.group}
+            value={answered.length > 0 && answered.map((d) => <span key={d.id} className="block">{answerText(d, values[d.id])}</span>)}
+            checks={[]}
+            total={total}
+            editing={e.is(g.group)}
+            onEdit={e.open(g.group)}
+          >
+            <GoogleAttributeEditor location={l} items={g.items} onDone={e.close} />
+          </Field>
+        );
+      })}
+    </SectionCard>
+  );
+}
+
+function GoogleAttributeEditor({ location, items, onDone }: { location: Location; items: AttributeDef[]; onDone: () => void }) {
+  const [draft, setDraft] = useState<Record<string, AttributeValue | undefined>>(() => Object.fromEntries(items.map((d) => [d.id, location.attributeValues?.[d.id]])));
+  const { busy, commit } = useFieldSave(location, onDone);
+  const set = (id: string, v: AttributeValue | undefined) => setDraft((x) => ({ ...x, [id]: v }));
+  const save = () => {
+    const next: Record<string, AttributeValue> = { ...(location.attributeValues ?? {}) };
+    for (const d of items) {
+      const v = draft[d.id];
+      if (v === undefined || (Array.isArray(v) && !v.length) || v === "") delete next[d.id];
+      else next[d.id] = v;
+    }
+    commit({ attributeValues: next }, "Saved on Google");
+  };
+  return (
+    <div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {items.map((d) => (
+          <div key={d.id} className={cn("flex min-h-11 flex-col justify-center gap-2 rounded-lg border bg-card px-3 py-2", (d.type === "repeated_enum" || d.type === "url") && "sm:col-span-2")}>
+            <div className="flex items-center justify-between gap-3">
+              <span className={cn("min-w-0 text-sm", draft[d.id] === undefined && "text-muted-foreground")}>{d.label}</span>
+              {d.type === "bool" && (
+                <Segmented
+                  size="sm"
+                  label={d.label}
+                  value={draft[d.id] === true ? "yes" : draft[d.id] === false ? "no" : "unset"}
+                  onChange={(v) => set(d.id, v === "yes" ? true : v === "no" ? false : undefined)}
+                  options={[
+                    { value: "yes", label: "Yes" },
+                    { value: "no", label: "No" },
+                    { value: "unset", label: "—" },
+                  ]}
+                />
+              )}
+              {d.type === "enum" && (
+                <SelectBox
+                  label={d.label}
+                  value={typeof draft[d.id] === "string" ? (draft[d.id] as string) : ""}
+                  onChange={(v) => set(d.id, v || undefined)}
+                  options={[{ value: "", label: "Not set" }, ...(d.options ?? [])]}
+                  className="w-44 shrink-0"
+                />
+              )}
+            </div>
+            {d.type === "repeated_enum" && (
+              <div className="flex flex-wrap gap-1.5">
+                {(d.options ?? []).map((o) => {
+                  const cur = (draft[d.id] as string[] | undefined) ?? [];
+                  const on = cur.includes(o.value);
+                  return (
+                    <button
+                      key={o.value}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => set(d.id, on ? cur.filter((x) => x !== o.value) : [...cur, o.value])}
+                      className={cn("rounded-full border px-2.5 py-1 text-xs font-medium", on ? "border-primary/40 bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-muted")}
+                    >
+                      {o.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {d.type === "url" && (
+              <input type="url" value={typeof draft[d.id] === "string" ? (draft[d.id] as string) : ""} onChange={(ev) => set(d.id, ev.target.value.trim() || undefined)} placeholder="https://" aria-label={d.label} className={inputClass} />
+            )}
+          </div>
+        ))}
+      </div>
+      <EditActions onCancel={onDone} busy={busy} onSave={save} />
     </div>
   );
 }

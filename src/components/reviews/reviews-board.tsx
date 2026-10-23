@@ -6,26 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { addDays, format, parseISO } from "date-fns";
 import { toast } from "sonner";
-import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import {
-  ArrowDown,
-  ArrowUp,
-  ChevronDown,
-  ChevronsUpDown,
-  Download,
-  Eye,
-  EyeOff,
-  Link2,
-  MessageSquare,
-  MessageSquareReply,
-  MoreHorizontal,
-  Search,
-  Send,
-  Star,
-  Wrench,
-} from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronsUpDown, Download, Eye, EyeOff, Link2, MessageSquare, MessageSquareReply, MoreHorizontal, Search, Send, Star, Wrench } from "lucide-react";
 import { Card, PanelHeader, StatStrip, buttonClass, inputClass } from "@/components/ui";
 import { Menu, Segmented, SelectBox } from "@/components/ui-client";
+import { ReviewTrendChart } from "./review-trend-chart";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { LocationMultiSelect } from "@/components/location-multi-select";
 import { GoogleIcon } from "@/components/marketing/channel-icon";
@@ -42,7 +26,6 @@ import {
   STATUS_ACTION_LABEL,
   downloadCsv,
   isReplied,
-  monthlyByYear,
   needsAttention,
   needsReply,
   nextStatuses,
@@ -74,6 +57,7 @@ export function ReviewsBoard({
   requests: allRequests,
   members,
   locations,
+  timeZone,
   scope,
   initialStatus = "all",
   initialReviewId,
@@ -88,6 +72,8 @@ export function ReviewsBoard({
   requests: (ReviewRequest & { locationTitle: string })[];
   members: TeamMember[];
   locations: BoardLocation[];
+  /** The business's time zone, for counting reviews per day / month in its own calendar. */
+  timeZone?: string;
   /** Selected location ids (one or more). */
   scope: string[];
   /** Status pill to start on (deep links such as "Needs reply"). */
@@ -199,9 +185,6 @@ export function ReviewsBoard({
 
   // All-time rating picture (not tied to the date range).
   const dist = useMemo(() => starDistribution(visible), [visible]);
-  const thisYear = new Date().getFullYear();
-  const years = useMemo(() => [thisYear - 1, thisYear], [thisYear]);
-  const monthly = useMemo(() => monthlyByYear(visible, years), [visible, years]);
   const allAvg = summarize(visible).avg;
 
   // ------------------------------------------------------------ requests view
@@ -445,13 +428,7 @@ export function ReviewsBoard({
       <div className="flex flex-col gap-2 border-b bg-muted/20 px-3 py-2.5 lg:flex-row lg:items-center">
         <div className="relative flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search client, comment, reply…"
-            aria-label="Search reviews"
-            className={cn(inputClass, "h-9 py-1.5 pl-9")}
-          />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search client, comment, reply…" aria-label="Search reviews" className={cn(inputClass, "h-9 py-1.5 pl-9")} />
         </div>
         <div className="grid grid-cols-2 gap-2 lg:flex">
           <SelectBox
@@ -529,9 +506,7 @@ export function ReviewsBoard({
                     <td className="max-w-[150px] truncate px-3 py-3 text-xs">{nameOf(r.assignedTo) ?? <span className="text-muted-foreground/50">—</span>}</td>
                     <td className="px-3 py-3">{statusBadge(r)}</td>
                     <td className="pr-3" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1">
-                        {reviewMenu(r)}
-                      </div>
+                      <div className="flex items-center justify-end gap-1">{reviewMenu(r)}</div>
                     </td>
                   </tr>
                 ))}
@@ -572,18 +547,13 @@ export function ReviewsBoard({
       />
     );
   };
-  const reqBadge = (r: ReviewRequest) => (
-    <span className={cn("whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold", requestInfo(r.status).tone)}>{requestInfo(r.status).label}</span>
-  );
+  const reqBadge = (r: ReviewRequest) => <span className={cn("whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold", requestInfo(r.status).tone)}>{requestInfo(r.status).label}</span>;
 
   const requestsView = (
     <>
       <div className="border-b px-3 py-3">
         {pills(
-          [
-            { key: "all", label: "All", count: reqCounts.all, pinned: true },
-            ...REQUEST_STATUSES.map((st) => ({ key: st.key, label: st.label, count: reqCounts[st.key] ?? 0, dot: st.dot })),
-          ],
+          [{ key: "all", label: "All", count: reqCounts.all, pinned: true }, ...REQUEST_STATUSES.map((st) => ({ key: st.key, label: st.label, count: reqCounts[st.key] ?? 0, dot: st.dot }))],
           reqStatus,
           setReqStatus,
         )}
@@ -704,7 +674,7 @@ export function ReviewsBoard({
       />
 
       {visible.length > 0 && (
-        <Card className="grid min-w-0 overflow-hidden lg:grid-cols-[minmax(0,340px)_minmax(0,1fr)]">
+        <Card className="grid min-w-0 overflow-hidden lg:grid-cols-[minmax(0,290px)_minmax(0,1fr)]">
           <div className="min-w-0 border-b lg:border-b-0 lg:border-r">
             <PanelHeader title="Ratings" meta={allAvg != null ? `${allAvg.toFixed(1)} ★ · ${visible.length.toLocaleString()}` : undefined} />
             <StarBars
@@ -717,55 +687,7 @@ export function ReviewsBoard({
               }}
             />
           </div>
-          <div className="min-w-0">
-            <PanelHeader
-              title="Reviews by month"
-              action={
-                <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2.5 w-2.5 rounded-sm bg-muted-foreground/35" />
-                    {years[0]}
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="h-2.5 w-2.5 rounded-sm" style={{ background: "var(--viz-1)" }} />
-                    {years[1]}
-                  </span>
-                </div>
-              }
-            />
-            <div className="h-[220px] px-2 pb-3 pt-4 sm:px-4">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthly} margin={{ top: 4, right: 4, left: 0, bottom: 0 }} barGap={2} barCategoryGap="22%">
-                  <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
-                  <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} interval={0} minTickGap={0} />
-                  <YAxis allowDecimals={false} tickLine={false} axisLine={false} width={32} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-                  <Tooltip
-                    cursor={{ fill: "hsl(var(--muted))", opacity: 0.6 }}
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const p = payload[0].payload as Record<string, number | string>;
-                      return (
-                        <div className="min-w-[130px] rounded-md border bg-popover px-3 py-2 text-xs shadow-elegant">
-                          <p className="mb-1 font-semibold">{p.month}</p>
-                          {years.map((y, i) => (
-                            <div key={y} className="flex items-center justify-between gap-4 py-0.5">
-                              <span className="flex items-center gap-1.5 text-muted-foreground">
-                                <span className={cn("h-2 w-2 rounded-sm", i === 0 && "bg-muted-foreground/40")} style={i === 1 ? { background: "var(--viz-1)" } : undefined} />
-                                {y}
-                              </span>
-                              <span className="tabular-nums">{Number(p[String(y)] ?? 0)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    }}
-                  />
-                  <Bar dataKey={String(years[0])} fill="hsl(var(--muted-foreground))" fillOpacity={0.35} radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
-                  <Bar dataKey={String(years[1])} fill="var(--viz-1)" radius={[3, 3, 0, 0]} maxBarSize={18} isAnimationActive={false} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          <ReviewTrendChart items={visible} range={range} timeZone={timeZone} />
         </Card>
       )}
 

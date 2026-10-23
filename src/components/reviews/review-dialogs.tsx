@@ -116,11 +116,7 @@ export function ReviewDialog({
           </div>
           <ReviewStars rating={review.rating} size="md" />
         </div>
-        {review.comment ? (
-          <p className="rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">“{review.comment}”</p>
-        ) : (
-          <p className="text-sm text-muted-foreground">Rating only — no comment.</p>
-        )}
+        {review.comment ? <p className="rounded-lg border bg-muted/40 px-3 py-2.5 text-sm">“{review.comment}”</p> : <p className="text-sm text-muted-foreground">Rating only — no comment.</p>}
 
         <section className="space-y-2">
           <div className="flex items-center justify-between gap-2">
@@ -155,15 +151,7 @@ export function ReviewDialog({
               })()}
             />
           </div>
-          <textarea
-            id="rv-reply"
-            rows={5}
-            value={text}
-            autoFocus={focus !== "followup"}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Write a reply…"
-            className={inputClass}
-          />
+          <textarea id="rv-reply" rows={5} value={text} autoFocus={focus !== "followup"} onChange={(e) => setText(e.target.value)} placeholder="Write a reply…" className={inputClass} />
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" className={buttonClass("default", "sm")} onClick={saveReply} disabled={!!busy}>
               {busy === "reply" && <Loader2 className="animate-spin" />}
@@ -179,9 +167,7 @@ export function ReviewDialog({
                 Remove reply
               </button>
             )}
-            <span className={cn("ml-auto text-xs tabular-nums text-muted-foreground", text.length > 4096 && "font-semibold text-destructive")}>
-              {text.length.toLocaleString()}/4,096
-            </span>
+            <span className={cn("ml-auto text-xs tabular-nums text-muted-foreground", text.length > 4096 && "font-semibold text-destructive")}>{text.length.toLocaleString()}/4,096</span>
           </div>
         </section>
 
@@ -244,12 +230,7 @@ export function ReviewDialog({
                 />
               </div>
               <span className="block text-sm font-medium">What happened</span>
-              <Segmented
-                label="Follow-up type"
-                value={fuType}
-                onChange={setFuType}
-                options={(Object.keys(FOLLOW_UP_LABEL) as FollowUpType[]).map((k) => ({ value: k, label: FOLLOW_UP_LABEL[k] }))}
-              />
+              <Segmented label="Follow-up type" value={fuType} onChange={setFuType} options={(Object.keys(FOLLOW_UP_LABEL) as FollowUpType[]).map((k) => ({ value: k, label: FOLLOW_UP_LABEL[k] }))} />
               <textarea rows={2} value={fuNote} autoFocus onChange={(e) => setFuNote(e.target.value)} placeholder="What did you do?" className={inputClass} maxLength={2000} />
               <div className="flex flex-wrap gap-2">
                 <button
@@ -465,9 +446,16 @@ export function RequestReviewDialog({
               />
             )}
           </div>
-          {method === "email" && <input value={subject} onChange={(e) => (setSubject(e.target.value), setEdited(true))} aria-label="Subject" placeholder="Subject" className={cn(inputClass, "font-medium")} />}
+          {method === "email" && (
+            <input value={subject} onChange={(e) => (setSubject(e.target.value), setEdited(true))} aria-label="Subject" placeholder="Subject" className={cn(inputClass, "font-medium")} />
+          )}
           {method === "email" && !editing ? (
-            <button type="button" onClick={() => setEditing(true)} className="group relative block w-full rounded-lg border bg-card px-3 py-2.5 text-left text-sm leading-relaxed hover:border-primary/40" aria-label="Edit message">
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="group relative block w-full rounded-lg border bg-card px-3 py-2.5 text-left text-sm leading-relaxed hover:border-primary/40"
+              aria-label="Edit message"
+            >
               <span className="block whitespace-pre-wrap break-words">
                 {splitOnLink(body).map((part, i, all) => (
                   <span key={i}>
@@ -481,7 +469,14 @@ export function RequestReviewDialog({
               </span>
             </button>
           ) : (
-            <textarea value={body} onChange={(e) => (setBody(e.target.value), setEdited(true))} aria-label="Message" rows={method === "email" ? 8 : 4} className={cn(inputClass, "resize-y leading-relaxed")} autoFocus={method === "email"} />
+            <textarea
+              value={body}
+              onChange={(e) => (setBody(e.target.value), setEdited(true))}
+              aria-label="Message"
+              rows={method === "email" ? 8 : 4}
+              className={cn(inputClass, "resize-y leading-relaxed")}
+              autoFocus={method === "email"}
+            />
           )}
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             {edited ? (
@@ -489,9 +484,15 @@ export function RequestReviewDialog({
                 Reset to template
               </button>
             ) : (
-              <span>{method === "email" ? (editing ? `${LINK_TOKEN} becomes the "${REVIEW_BUTTON_LABEL}" button.` : "Click the message to edit it.") : "Name and review link fill in automatically."}</span>
+              <span>
+                {method === "email" ? (editing ? `${LINK_TOKEN} becomes the "${REVIEW_BUTTON_LABEL}" button.` : "Click the message to edit it.") : "Name and review link fill in automatically."}
+              </span>
             )}
-            {method !== "email" && <span className="tabular-nums">{smsLen} chars · {Math.max(1, Math.ceil(smsLen / 160))} SMS</span>}
+            {method !== "email" && (
+              <span className="tabular-nums">
+                {smsLen} chars · {Math.max(1, Math.ceil(smsLen / 160))} SMS
+              </span>
+            )}
           </div>
           {!link && <p className="text-xs text-warning">This location has no Google place id yet, so the message has no review link.</p>}
         </div>

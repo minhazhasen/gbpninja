@@ -1,6 +1,7 @@
 import { ChartLegend, MetricsChart } from "@/components/metrics-chart";
 import { PerformanceControls } from "@/components/performance/performance-controls";
 import { SearchQueriesPanel } from "@/components/performance/search-queries-panel";
+import { SyncIssues } from "@/components/sync-issues";
 import { Card, PanelHeader, PillTabs, StatStrip } from "@/components/ui";
 import { rangeFromParams } from "@/lib/date-ranges";
 import { getProvider } from "@/lib/gbp";
@@ -16,7 +17,10 @@ export default async function PerformancePage({ searchParams }: Props) {
   const provider = await getProvider();
   const locations = await provider.listLocations();
   // `?location=` is "all", one id, or several ids joined by ","; the picked locations are added together.
-  const scope = parseLocationScope(sp.location, locations.map((l) => l.id));
+  const scope = parseLocationScope(
+    sp.location,
+    locations.map((l) => l.id),
+  );
   const picked = locations.filter((l) => scope.includes(l.id));
 
   const range = rangeFromParams(sp);
@@ -27,6 +31,7 @@ export default async function PerformancePage({ searchParams }: Props) {
     Promise.all(picked.map((l) => provider.getSearchKeywords(l.id))),
   ]);
   const { cur, before, chart, start } = rangeView(perLocation, range, series);
+  const issues = (await provider.getSyncIssues?.(picked.map((l) => l.id))) ?? [];
 
   const qs = (extra: Record<string, string>) => `?${new URLSearchParams({ ...(Object.fromEntries(Object.entries(sp).filter(([, v]) => v != null)) as Record<string, string>), ...extra })}`;
   const stat = (key: SeriesKey, hint?: string) => ({
@@ -45,6 +50,7 @@ export default async function PerformancePage({ searchParams }: Props) {
         <PerformanceControls locations={locations.map(({ id, title }) => ({ id, title }))} scope={scope} />
       </div>
 
+      <SyncIssues issues={issues} />
       <StatStrip
         cols={5}
         items={[

@@ -115,11 +115,13 @@ export function auditLocation(location: Location, reviews: Review[], posts: Post
   const detailed = l.services.filter((x) => x.description || (x.priceType && x.priceType !== "none")).length;
   add("services", "services-details", "Services have prices or descriptions", 4, svc ? tri(detailed === svc, detailed >= svc / 2) : "fail", svc ? `${detailed} of ${svc} services have a price or description.` : "Add services first.");
 
-  // ---- products
+  // ---- products (not judged when Google's API doesn't share them: no guessing)
   const prods = l.products ?? [];
+  if (!l.notInApi?.includes("products")) {
   add("products", "products-count", "Products listed", 5, tri(prods.length >= 3, prods.length >= 1), prods.length >= 3 ? `${prods.length} products listed.` : `${prods.length} product${prods.length === 1 ? "" : "s"} — add at least 3 with prices so they show as a catalogue.`);
   const withPhoto = prods.filter((p) => p.photo).length;
   add("products", "products-photos", "Products have photos", 2, prods.length ? tri(withPhoto === prods.length, withPhoto > 0) : "fail", prods.length ? `${withPhoto} of ${prods.length} products have a photo.` : "Add products first.");
+  }
 
   // ---- photos (managed in Google; shown here as guidance)
   add("photos", "photos-count", "At least 10 photos", 6, tri(l.photoCount >= 10, l.photoCount >= 3), `${l.photoCount} photo${l.photoCount === 1 ? "" : "s"} uploaded.`, false);

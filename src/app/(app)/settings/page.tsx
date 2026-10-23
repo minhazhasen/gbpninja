@@ -4,7 +4,6 @@ import { TemplatesBoard } from "@/components/settings/templates-board";
 import { PageHeader, PillTabs } from "@/components/ui";
 import { channelAvailable, isDemo } from "@/lib/connections";
 import { getProvider } from "@/lib/gbp";
-import { resolveLocation } from "@/lib/location";
 import { CHANNELS } from "@/lib/posts";
 import { isTemplateKind } from "@/lib/templates";
 import { withLocation } from "@/lib/utils";
@@ -17,8 +16,12 @@ const TABS = [
 type Tab = (typeof TABS)[number]["key"];
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ location?: string; tab?: string; kind?: string }> }) {
-  const { location } = await resolveLocation(searchParams);
+  // Works before any location is connected (that's where you connect one).
   const sp = await searchParams;
+  const all = await (await getProvider()).listLocations();
+  const location = all.find((l) => l.id === sp.location) ?? all[0] ?? null;
+  const here = (path: string, extra: Record<string, string> = {}) =>
+    location ? withLocation(path, location.id, extra) : `${path}${Object.keys(extra).length ? `?${new URLSearchParams(extra)}` : ""}`;
   const tab: Tab = TABS.some((t) => t.key === sp.tab) ? (sp.tab as Tab) : "accounts";
   const provider = await getProvider();
   const demo = isDemo();
@@ -26,10 +29,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   let body: React.ReactNode;
   if (tab === "email") {
     const sender = await provider.getEmailSender();
-    body = <EmailSettings sender={sender} businessName={location.title} available={channelAvailable("google")} demo={demo} templatesHref={withLocation("/settings", location.id, { tab: "templates" })} />;
+    body = (
+      <EmailSettings sender={sender} businessName={location?.title ?? "your business"} available={channelAvailable("google")} demo={demo} templatesHref={here("/settings", { tab: "templates" })} />
+    );
   } else if (tab === "templates") {
     const templates = await provider.listTemplates();
-    body = <TemplatesBoard templates={templates} businessName={location.title} initialKind={isTemplateKind(sp.kind) ? sp.kind : "request_email"} />;
+    body = <TemplatesBoard templates={templates} businessName={location?.title ?? "your business"} initialKind={isTemplateKind(sp.kind) ? sp.kind : "request_email"} />;
   } else {
     const [connections, locations, searchConsole] = await Promise.all([provider.listConnections(), provider.listLocations(), provider.getSearchConsole()]);
     body = (
@@ -50,7 +55,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   return (
     <div className="space-y-5 pb-8">
       <PageHeader title="Settings">{TABS.find((t) => t.key === tab)!.intro}</PageHeader>
-      <PillTabs label="Settings sections" items={TABS.map((t) => ({ href: withLocation("/settings", location.id, t.key === "accounts" ? {} : { tab: t.key }), label: t.label, active: t.key === tab }))} />
+      <PillTabs label="Settings sections" items={TABS.map((t) => ({ href: here("/settings", t.key === "accounts" ? {} : { tab: t.key }), label: t.label, active: t.key === tab }))} />
       {body}
     </div>
   );
