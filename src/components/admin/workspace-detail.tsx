@@ -1,21 +1,32 @@
 "use client";
 
-// One workspace: status, profiles, members, internal notes and its admin history.
+// One workspace: status, activity + performance (children), profiles, members, internal notes and its admin history.
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format, formatDistanceToNow, parseISO } from "date-fns";
 import { toast } from "sonner";
-import { ArrowUpRight, Loader2, MoreHorizontal, Pause, Play, Trash2 } from "lucide-react";
+import { ArrowUpRight, ListTodo, Loader2, MoreHorizontal, Pause, Play, Trash2 } from "lucide-react";
 import { Avatar, Badge, Card, PageHeader, PanelHeader, buttonClass, inputClass } from "@/components/ui";
 import { Menu, useConfirm } from "@/components/ui-client";
-import { deleteWorkspace, saveWorkspaceNotes, setWorkspaceStatus } from "@/app/admin/actions";
+import { createLinkedTask, deleteWorkspace, saveWorkspaceNotes, setWorkspaceStatus } from "@/app/admin/actions";
 import type { AdminLogEntry, Workspace } from "@/lib/platform/types";
 import { WORKSPACE_STATUS } from "@/lib/platform/types";
 
 type Result = { ok: true; message?: string } | { ok: false; error: string };
 
-export function WorkspaceDetail({ workspace: w, history }: { workspace: Workspace; history: AdminLogEntry[] }) {
+export function WorkspaceDetail({
+  workspace: w,
+  history,
+  hideProfiles,
+  children,
+}: {
+  workspace: Workspace;
+  history: AdminLogEntry[];
+  /** The insights panel already lists the profiles. */
+  hideProfiles?: boolean;
+  children?: React.ReactNode;
+}) {
   const router = useRouter();
   const { confirm, dialog } = useConfirm();
   const [busy, setBusy] = useState<string | null>(null);
@@ -57,6 +68,13 @@ export function WorkspaceDetail({ workspace: w, history }: { workspace: Workspac
     router.push("/admin/workspaces");
   };
 
+  const addTask = async () => {
+    const res = await createLinkedTask("workspace", w.id);
+    if (!res.ok) return void toast.error(res.error);
+    toast.success("Task added", { action: { label: "Open", onClick: () => router.push(`/admin/tasks?task=${res.id}`) } });
+    router.refresh();
+  };
+
   const ago = (iso: string | null | undefined) => (iso ? formatDistanceToNow(parseISO(iso), { addSuffix: true }) : "Never");
 
   return (
@@ -91,6 +109,7 @@ export function WorkspaceDetail({ workspace: w, history }: { workspace: Workspac
                 </button>
               )}
               items={[
+                { label: "Add task", icon: ListTodo, onSelect: addTask },
                 {
                   label: w.status === "suspended" ? "Reactivate" : "Suspend",
                   icon: w.status === "suspended" ? Play : Pause,
@@ -141,18 +160,22 @@ export function WorkspaceDetail({ workspace: w, history }: { workspace: Workspac
         ))}
       </Card>
 
-      <Card className="overflow-hidden">
-        <PanelHeader title="Profiles" meta={w.profiles.length || undefined} />
-        <ul className="divide-y">
-          {w.profiles.map((p) => (
-            <li key={p.id} className="px-5 py-3 lg:px-6">
-              <p className="truncate text-sm font-semibold">{p.title}</p>
-              <p className="truncate text-xs text-muted-foreground">{p.address}</p>
-            </li>
-          ))}
-        </ul>
-        {!w.profiles.length && <p className="px-5 py-8 text-center text-sm text-muted-foreground">No profiles connected yet.</p>}
-      </Card>
+      {children}
+
+      {!hideProfiles && (
+        <Card className="overflow-hidden">
+          <PanelHeader title="Profiles" meta={w.profiles.length || undefined} />
+          <ul className="divide-y">
+            {w.profiles.map((p) => (
+              <li key={p.id} className="px-5 py-3 lg:px-6">
+                <p className="truncate text-sm font-semibold">{p.title}</p>
+                <p className="truncate text-xs text-muted-foreground">{p.address}</p>
+              </li>
+            ))}
+          </ul>
+          {!w.profiles.length && <p className="px-5 py-8 text-center text-sm text-muted-foreground">No profiles connected yet.</p>}
+        </Card>
+      )}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card className="overflow-hidden">

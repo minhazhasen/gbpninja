@@ -1,18 +1,26 @@
 import { notFound } from "next/navigation";
 import { AdminShell } from "@/components/admin/admin-shell";
-import { platformAdmin } from "@/lib/admin";
-import { listLeads } from "@/lib/platform/store";
+import { platformMember } from "@/lib/admin";
+import { listIssues, listLeads, listPlatformTasks } from "@/lib/platform/store";
+import { isUpcomingMeeting } from "@/lib/platform/types";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Platform admin" };
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  const admin = await platformAdmin();
-  // Not an admin: the panel doesn't exist for them.
-  if (!admin) notFound();
-  const leads = await listLeads();
+  const me = await platformMember();
+  // Not on the platform team: the panel doesn't exist for them.
+  if (!me) notFound();
+  const [leads, issues, tasks] = await Promise.all([listLeads(), listIssues(), listPlatformTasks()]);
   return (
-    <AdminShell admin={admin} newLeads={leads.filter((l) => l.status === "booked").length}>
+    <AdminShell
+      admin={me.email}
+      badges={{
+        meetings: leads.filter((l) => isUpcomingMeeting(l)).length,
+        issues: issues.filter((i) => i.status === "open").length,
+        tasks: tasks.filter((t) => !t.parentId && t.stage !== "done" && t.assigneeId === me.id).length,
+      }}
+    >
       {children}
     </AdminShell>
   );

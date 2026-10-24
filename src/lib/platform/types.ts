@@ -81,6 +81,8 @@ export interface Offer {
   views: number;
   clicks: number;
   closes: number;
+  /** Only these workspaces see it (sent from Admin → Workspaces or picked in the offer form); empty / missing = every workspace. */
+  workspaceIds?: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -144,5 +146,80 @@ export function meetingReminderVisible(l: Pick<OfferLead, "meetingAt" | "meetSha
   return [l.meetSharedAt, l.changeAnswer?.answeredAt, l.cancelAnswer?.answeredAt].some((t) => !!t && t > l.reminderClosedAt!);
 }
 
+/** Admin → Meetings tabs (`?filter=`). */
+export const MEETING_FILTERS = ["upcoming", "requests", "past", "all"] as const;
+export type MeetingFilter = (typeof MEETING_FILTERS)[number];
+
 /** Meetings the client still sees (booked and not long over). */
 export const isUpcomingMeeting = (l: Pick<OfferLead, "status" | "meetingAt">, now = Date.now()) => l.status === "booked" && new Date(l.meetingAt).getTime() + 60 * 60_000 > now;
+
+// ---------------------------------------------------------------- issues reported from the app
+
+export type IssueStatus = "open" | "in_progress" | "resolved" | "closed";
+export type IssueCategory = "bug" | "data" | "connection" | "account" | "idea" | "other";
+
+/** "Report an issue" from the app's account menu. The platform team answers in Admin → Issues. */
+export interface Issue {
+  id: string;
+  workspaceId: string;
+  workspaceName: string;
+  reporterName: string;
+  reporterEmail: string;
+  category: IssueCategory;
+  subject: string;
+  description: string;
+  /** The page the reporter was on (path + query). */
+  page?: string | null;
+  status: IssueStatus;
+  /** Platform team member id. */
+  assigneeId?: string | null;
+  /** Answer shown to the reporter in the app. */
+  reply?: { text: string; by: string; at: string } | null;
+  /** Platform team's private notes. */
+  adminNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string | null;
+}
+
+export const ISSUE_STATUS: Record<IssueStatus, { label: string; variant: "warning" | "info" | "success" | "secondary" }> = {
+  open: { label: "Open", variant: "warning" },
+  in_progress: { label: "In progress", variant: "info" },
+  resolved: { label: "Resolved", variant: "success" },
+  closed: { label: "Closed", variant: "secondary" },
+};
+export const ISSUE_CATEGORIES: Record<IssueCategory, string> = {
+  bug: "Something isn't working",
+  data: "Wrong or missing data",
+  connection: "Connecting accounts",
+  account: "Account & sign-in",
+  idea: "Idea or request",
+  other: "Something else",
+};
+/** Admin → Issues tabs (`?status=`). */
+export const ISSUE_FILTERS = ["open", "in_progress", "resolved", "all"] as const;
+export type IssueFilter = (typeof ISSUE_FILTERS)[number];
+export const isOpenIssue = (i: Pick<Issue, "status">) => i.status === "open" || i.status === "in_progress";
+
+// ---------------------------------------------------------------- platform team
+
+/** admin = everything, incl. the team; staff = everything except adding / removing team members. */
+export type TeamRole = "admin" | "staff";
+
+/** People running the platform. They sign in to the app like anyone else; their email opens the admin panel. */
+export interface PlatformTeamMember {
+  id: string;
+  name: string;
+  email: string;
+  role: TeamRole;
+  /** Listed in PLATFORM_ADMIN_EMAILS: always an admin, can't be removed here. */
+  fromEnv?: boolean;
+  createdAt: string;
+  addedBy?: string | null;
+  lastActiveAt?: string | null;
+}
+
+export const TEAM_ROLES: Record<TeamRole, { label: string; hint: string }> = {
+  admin: { label: "Admin", hint: "Everything, including the team" },
+  staff: { label: "Staff", hint: "Workspaces, offers, meetings, issues and tasks" },
+};

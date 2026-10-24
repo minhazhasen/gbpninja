@@ -184,12 +184,27 @@ a content calendar for posts, and a profile audit with in-app fixes.
   `source.type = "audit"`); the row then shows the assignee + stage, and the task is marked done once the check passes (mock `listTasks`).
   List view has column headers (Task / Priority / Due date / Assignee) from `lg` up. Mock keeps tasks in memory; google provider stubs → move to Prisma. `/tasks?task=<id>` opens a task; `/reviews?review=<id>` opens a review.
 - Platform admin panel (`src/app/admin/`, own shell `components/admin/admin-shell.tsx`, not in the app sidebar) — for the people running
-  the platform. Guarded by `platformAdmin()` in `src/lib/admin.ts` (`PLATFORM_ADMIN_EMAILS`; local demo runs = everyone, production builds
-  never); non-admins get a 404. Linked from the account menu for admins. Pages: Overview, Workspaces (+ `/admin/workspaces/[id]`:
-  suspend/reactivate, profiles, members, notes, delete), Integrations (env checklist,
+  the platform. Guarded by `platformMember()` / `platformAdmin()` in `src/lib/admin.ts`: `PLATFORM_ADMIN_EMAILS` (always admins, can't be
+  removed) + the team added in Admin → Team (`/admin/team`, `team-board.tsx`; roles `admin` = everything incl. the team, `staff` = the rest;
+  store `team`, `listTeam(envAdmins)`; they sign in to the app with that email). Local demo runs = a demo admin, production builds never;
+  non-team get a 404. Linked from the account menu for admins. Sidebar: Overview; Customers (Workspaces, Offers, Meetings, Issues); Team
+  (Tasks, Team); Platform. Badges = upcoming meetings, new issues, my open tasks. Workspaces (+ `/admin/workspaces/[id]`: suspend/reactivate,
+  members, notes, delete, Add task; activity + performance via `workspaceInsights(id)` in store.ts — runs that workspace's provider inside
+  `runInTenant`, last 30 days, counts only (views/actions vs previous 30, rating, reply rate, posts, requests, tasks, activity feed,
+  connections; `workspace-insights.tsx`), plus its offers (`workspace-offers.tsx`: Send offer), meetings, issues, team tasks).
+  Offer targeting: `Offer.workspaceIds` ([] = every workspace); `sendOffer(ws, offer)` adds the workspace, clears its close and records
+  `offerSent` (skips the new-account wait; `offerFor` prefers the last-sent offer); offer form "Who sees it" (every / chosen workspaces),
+  `/admin/offers?new=1&for=<ws>` opens a new offer for one workspace. Meetings page `/admin/meetings` (`meetings-board.tsx`, `?filter=`
+  upcoming/requests/past/all, `?meeting=` opens one) — the Offers page only lists offers. Issues: "Report an issue" in the app's account
+  menu (`components/report-issue-dialog.tsx`: category, summary, details + current page; "Your reports" shows status and the team's answer,
+  never `adminNote`) → app actions `reportIssue` / `myIssues` → store `issues` → `/admin/issues` (`issues-board.tsx`: status tabs
+  `?status=`, `?issue=`, assignee, answer to reporter `replyToIssue`, private notes, Add task). Admin Tasks `/admin/tasks` reuse the
+  workspace `TasksBoard` (`api` = platform actions, `platform` options: `locationId` = the workspace, type filter issue/meeting/workspace);
+  store `tasks`; `createLinkedTask(kind, id)` makes a task with `source: { type: "platform", kind, refId, label, href }` (one open per item).
+  Filter constants used by server pages live in `platform/types.ts` (not in "use client" files). Integrations (env checklist,
   `src/lib/platform/setup.ts` — the developer setup lives here, not in Settings), Announcements (banner in the app shell, one live at a time,
   `components/announcement-banner.tsx`), Offers (service promos like managed Local SEO: title, info, price, button → every workspace's Dashboard
-  `components/offer-card.tsx`; no plans or billing — the app is free; the button opens a booking form (date + weekday
+  `components/offer-card.tsx`, or only to chosen workspaces; no plans or billing — the app is free; the button opens a booking form (date + weekday
   time slots `MEETING_SLOTS`, no double-booking via `takenSlots`) → `bookOffer` → a meeting lead booked/met/won/lost; views/clicks counted once per
   browser session via `trackOffer`; timing per offer: first shown `startAfterDays` (7) after the workspace signs up, then daily until
   the workspace closes it (✕ → `dismissOffer`, stored server-side per workspace) and again `snoozeDays` (7) later — `offerHiddenReason`;

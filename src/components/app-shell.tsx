@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   BarChart3,
+  Bug,
   Building2,
   CalendarDays,
   Check,
@@ -32,6 +33,7 @@ import { toast } from "sonner";
 import { signOutAction } from "@/app/(app)/actions";
 import { AnnouncementBanner } from "@/components/announcement-banner";
 import { BrandLogo, BrandMark } from "@/components/brand";
+import { ReportIssueDialog } from "@/components/report-issue-dialog";
 import type { Announcement } from "@/lib/platform/types";
 import { cn, initials } from "@/lib/utils";
 
@@ -403,6 +405,7 @@ function LocationSwitcher({ locations, current }: { locations: ShellLocation[]; 
 function AccountMenu({ user, demo, qs, mini, platformAdmin }: { user: { name: string; role: "admin" | "member"; avatarUrl: string | null }; demo: boolean; qs: string; mini: boolean; platformAdmin: boolean }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const items = accountItems.filter((i) => !i.admin || user.role === "admin");
   const onAccountPage = items.some((i) => pathname === i.href || pathname.startsWith(`${i.href}/`));
@@ -428,6 +431,7 @@ function AccountMenu({ user, demo, qs, mini, platformAdmin }: { user: { name: st
 
   return (
     <div ref={ref} className="relative">
+      <ReportIssueDialog open={reporting} onClose={() => setReporting(false)} />
       {open && (
         <div
           role="menu"
@@ -471,6 +475,18 @@ function AccountMenu({ user, demo, qs, mini, platformAdmin }: { user: { name: st
             </>
           )}
           <div className="my-1 h-px bg-border" />
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setReporting(true);
+            }}
+            className="flex h-10 w-full items-center gap-3 rounded-lg px-2.5 text-left text-sm text-foreground outline-none transition-colors hover:bg-muted focus-visible:bg-muted"
+          >
+            <Bug className="size-[18px] shrink-0 text-muted-foreground" />
+            Report an issue
+          </button>
           <button
             type="button"
             role="menuitem"

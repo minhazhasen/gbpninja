@@ -17,7 +17,18 @@ import { auditLocation } from "@/lib/audit";
 import { isMapsUrl, resolveMapsLink, type MapsLinkInfo } from "@/lib/maps-link";
 import { distanceKm as distance, lookupCoords, scrapeMapsLink, type ScrapedPlace } from "@/lib/maps-scrape";
 import { refreshCompetitors } from "@/lib/competitor-refresh";
-import { addLead, closeOffer, currentWorkspaceId, getLead, listOffers, logAction, trackOffer as trackOfferEvent, updateLead } from "@/lib/platform/store";
+import {
+  addLead,
+  closeOffer,
+  currentWorkspaceId,
+  getLead,
+  issuesForCurrentWorkspace,
+  listOffers,
+  logAction,
+  reportIssue as fileIssue,
+  trackOffer as trackOfferEvent,
+  updateLead,
+} from "@/lib/platform/store";
 import { APP_NAME } from "@/components/brand";
 import { LINK_TOKEN, SAMPLE_VARS, emailHtml, mergeTemplate, splitOnLink, templateOrder } from "@/lib/templates";
 import { reviewLink } from "@/lib/reviews";
@@ -1028,7 +1039,7 @@ export async function dismissOffer(offerId: string): Promise<void> {
   // TODO: the signed-in member's workspace once multi-workspace sign-in lands.
   closeOffer(await currentWorkspaceId(), offerId.slice(0, 200));
   revalidatePath("/dashboard");
-  revalidatePath("/admin/offers");
+  revalidatePath("/admin", "layout");
 }
 
 /** Book a meeting about an offer (Dashboard offer card) → a lead in Admin → Offers. */
@@ -1229,5 +1240,37 @@ export async function checkCompetitorsNow(locationId: string): Promise<{ ok: tru
     return { ok: true, checked: r.checked, updated: r.updated, failed: r.failed };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Something went wrong" };
+  }
+}
+
+// ---------------------------------------------------------------- report an issue (account menu) → Admin → Issues
+
+/** File a problem or idea for the platform team, from any page. */
+export async function reportIssue(input: { category: string; subject: string; description: string; page?: string | null }): Promise<ActionResult> {
+  try {
+    const d = z
+      .object({
+        category: z.enum(["bug", "data", "connection", "account", "idea", "other"]),
+        subject: z.string().trim().min(3, "Add a short summary").max(120, "Keep the summary under 120 characters"),
+        description: z.string().trim().min(10, "Tell us a bit more (what you did and what happened)").max(4000),
+        page: z.string().max(500).nullable().optional(),
+      })
+      .parse(input);
+    const me = await (await getProvider()).getCurrentMember();
+    const issue = await fileIssue({ ...d, page: d.page ?? null, reporterName: me.name, reporterEmail: me.email });
+    logAction(me.email || me.name, "Reported an issue", `${issue.workspaceName} · ${issue.subject}`);
+    revalidatePath("/admin", "layout");
+    return { ok: true, id: issue.id };
+  } catch (e) {
+    return { ok: false, error: firstIssue(e) ?? (e instanceof Error ? e.message : "Something went wrong") };
+  }
+}
+
+/** This workspace's reports with their status and the team's answer (for the Report an issue dialog). */
+export async function myIssues() {
+  try {
+    return await issuesForCurrentWorkspace();
+  } catch {
+    return [];
   }
 }

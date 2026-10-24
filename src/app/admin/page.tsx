@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { formatDistanceToNowStrict, parseISO } from "date-fns";
-import { Clock, Megaphone, PlugZap, ShieldAlert, Tag } from "lucide-react";
+import { Bug, Clock, ListTodo, Megaphone, PlugZap, ShieldAlert, Tag } from "lucide-react";
 import { QuickAction } from "@/components/admin/quick-action";
 import { Card, PageHeader, PanelHeader, SectionLink, StatStrip, buttonClass } from "@/components/ui";
-import { listLeads, listLog, listOffers, listWorkspaces } from "@/lib/platform/store";
+import { platformMember } from "@/lib/admin";
+import { listIssues, listLeads, listLog, listOffers, listPlatformTasks, listWorkspaces } from "@/lib/platform/store";
 import { setupChecklist } from "@/lib/platform/setup";
 import { isUpcomingMeeting } from "@/lib/platform/types";
 import { fmt } from "@/lib/utils";
@@ -11,7 +12,10 @@ import { fmt } from "@/lib/utils";
 type Todo = { key: string; icon: React.ElementType; tone: string; title: string; action: React.ReactNode };
 
 export default async function AdminOverviewPage() {
-  const [workspaces, offers, log, leads] = await Promise.all([listWorkspaces(), listOffers(), listLog(), listLeads()]);
+  const [workspaces, offers, log, leads, issues, tasks, me] = await Promise.all([listWorkspaces(), listOffers(), listLog(), listLeads(), listIssues(), listPlatformTasks(), platformMember()]);
+  const openIssues = issues.filter((i) => i.status === "open").length;
+  const today = new Date().toISOString().slice(0, 10);
+  const myDue = tasks.filter((t) => !t.parentId && t.stage !== "done" && t.assigneeId === me?.id && t.dueDate && t.dueDate <= today).length;
   const newLeads = leads.filter((l) => l.status === "booked").length;
   const moveRequests = leads.filter((l) => (l.changeRequest || l.cancelRequest) && l.status === "booked").length;
   const missing = setupChecklist().filter((s) => !s.ok).length;
@@ -35,12 +39,18 @@ export default async function AdminOverviewPage() {
             icon: Clock,
             tone: "bg-warning/10 text-warning",
             title: `${moveRequests} meeting request${moveRequests === 1 ? "" : "s"} (new time or cancel)`,
-            action: link("/admin/offers", "Review"),
+            action: link("/admin/meetings?filter=requests", "Review"),
           },
         ]
       : []),
     ...(newLeads
-      ? [{ key: "leads", icon: Tag, tone: "bg-success/10 text-success", title: `${newLeads} offer meeting${newLeads === 1 ? "" : "s"} booked`, action: link("/admin/offers", "View") }]
+      ? [{ key: "leads", icon: Tag, tone: "bg-success/10 text-success", title: `${newLeads} offer meeting${newLeads === 1 ? "" : "s"} booked`, action: link("/admin/meetings", "View") }]
+      : []),
+    ...(openIssues
+      ? [{ key: "issues", icon: Bug, tone: "bg-warning/10 text-warning", title: `${openIssues} new issue${openIssues === 1 ? "" : "s"} reported`, action: link("/admin/issues", "Open") }]
+      : []),
+    ...(myDue
+      ? [{ key: "tasks", icon: ListTodo, tone: "bg-info/10 text-info", title: `${myDue} of your tasks due today or overdue`, action: link("/admin/tasks", "Tasks") }]
       : []),
     ...suspended.map((w) => ({
       key: `sus-${w.id}`,
@@ -70,7 +80,7 @@ export default async function AdminOverviewPage() {
           { label: "Workspaces", value: fmt(workspaces.length), href: "/admin/workspaces" },
           { label: "Profiles", value: fmt(profiles) },
           { label: "Users", value: fmt(users) },
-          { label: "Meetings", value: fmt(upcoming), hint: "Upcoming", href: "/admin/offers" },
+          { label: "Meetings", value: fmt(upcoming), hint: "Upcoming", href: "/admin/meetings" },
         ]}
       />
 

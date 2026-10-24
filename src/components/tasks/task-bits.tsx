@@ -1,7 +1,7 @@
 "use client";
 
 // Small pieces shared by the task list, board, calendar and dialog.
-import { CalendarDays, Check, ClipboardCheck, ListChecks, MessageSquareWarning, Star } from "lucide-react";
+import { Bug, Building2, CalendarClock, CalendarDays, Check, ClipboardCheck, ListChecks, MessageSquareWarning, Star } from "lucide-react";
 import type { Task, TaskPriority, TaskStage } from "@/lib/gbp/types";
 import { dueIn, dueLabel, priorityInfo, stageInfo } from "@/lib/tasks";
 import { cn, initials } from "@/lib/utils";
@@ -75,8 +75,24 @@ export function SubtaskCount({ subtasks }: { subtasks: Task[] }) {
   );
 }
 
+/** Admin tasks linked to a meeting, issue or workspace. */
+export const PLATFORM_SOURCE = {
+  meeting: { label: "Meeting", open: "Open meeting", icon: CalendarClock },
+  issue: { label: "Issue", open: "Open issue", icon: Bug },
+  workspace: { label: "Workspace", open: "Open workspace", icon: Building2 },
+} as const;
+
 /** "Review ★2" chip on review follow-ups, "Audit" on tasks from the profile audit checklist. */
 export function SourceBadge({ task }: { task: Task }) {
+  if (task.source?.type === "platform") {
+    const Icon = PLATFORM_SOURCE[task.source.kind].icon;
+    return (
+      <span className="inline-flex max-w-56 items-center gap-1 whitespace-nowrap rounded-md bg-accent px-1.5 py-0.5 text-[11px] font-semibold text-accent-foreground" title={task.source.label}>
+        <Icon className="h-3 w-3 shrink-0" />
+        <span className="truncate">{PLATFORM_SOURCE[task.source.kind].label}</span>
+      </span>
+    );
+  }
   if (task.source?.type === "audit")
     return (
       <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-accent px-1.5 py-0.5 text-[11px] font-semibold text-accent-foreground" title="From the profile audit checklist">

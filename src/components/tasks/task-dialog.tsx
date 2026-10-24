@@ -12,7 +12,7 @@ import type { Task, TaskPatch, TaskPriority, TaskStage } from "@/lib/gbp/types";
 import { TASK_PRIORITIES, TASK_STAGES } from "@/lib/tasks";
 import { AUDIT_TABS, type AuditTab } from "@/lib/audit";
 import { cn } from "@/lib/utils";
-import { DoneToggle, DueChip, MemberAvatar, type TaskMember } from "./task-bits";
+import { DoneToggle, DueChip, MemberAvatar, PLATFORM_SOURCE, type TaskMember } from "./task-bits";
 
 export interface SubtaskDraft {
   title: string;
@@ -49,6 +49,7 @@ export function TaskDialog({
   onToggleDone,
   onAddSubtask,
   onDelete,
+  scope = { label: "Location", all: "All locations" },
 }: {
   open: boolean;
   /** null = new task */
@@ -64,6 +65,8 @@ export function TaskDialog({
   onToggleDone: (t: Task) => void;
   onAddSubtask: (parentId: string, title: string) => Promise<boolean>;
   onDelete: (t: Task) => void;
+  /** What `locationId` means here: a location (workspace tasks) or a workspace (platform admin tasks). */
+  scope?: { label: string; all: string };
 }) {
   const { confirm, dialog } = useConfirm();
   const [draft, setDraft] = useState<TaskDraft>(() => fromTask(task, preset));
@@ -240,8 +243,8 @@ export function TaskDialog({
               <DateField value={draft.dueDate ?? ""} onChange={(v) => set("dueDate", v || null)} placeholder="No due date" />
             </Prop>
             {!task?.parentId && (
-              <Prop label="Location">
-                <SelectBox label="Location" value={draft.locationId ?? ""} onChange={(v) => set("locationId", v || null)} options={[{ value: "", label: "All locations" }, ...locations.map((l) => ({ value: l.id, label: l.title }))]} />
+              <Prop label={scope.label}>
+                <SelectBox label={scope.label} value={draft.locationId ?? ""} onChange={(v) => set("locationId", v || null)} options={[{ value: "", label: scope.all }, ...locations.map((l) => ({ value: l.id, label: l.title }))]} />
               </Prop>
             )}
             {task?.source?.type === "review" && (
@@ -273,9 +276,18 @@ export function TaskDialog({
                 <p className="text-[11px] text-muted-foreground">Marked done automatically once the profile passes this check.</p>
               </div>
             )}
+            {task?.source?.type === "platform" && (
+              <div className="space-y-2 rounded-lg border bg-card p-3">
+                <p className="label-caps">Linked {PLATFORM_SOURCE[task.source.kind].label.toLowerCase()}</p>
+                <p className="line-clamp-2 text-sm font-semibold">{task.source.label}</p>
+                <Link href={task.source.href} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+                  {PLATFORM_SOURCE[task.source.kind].open} <ExternalLink className="h-3 w-3" />
+                </Link>
+              </div>
+            )}
             {task && (
               <p className="text-xs text-muted-foreground">
-                {task.source ? "Created automatically" : `Created by ${memberOf(task.createdBy)?.name ?? "someone"}`} {formatDistanceToNow(parseISO(task.createdAt), { addSuffix: true })}
+                {task.source && task.source.type !== "platform" ? "Created automatically" : `Created by ${memberOf(task.createdBy)?.name ?? "someone"}`} {formatDistanceToNow(parseISO(task.createdAt), { addSuffix: true })}
               </p>
             )}
           </aside>

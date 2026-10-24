@@ -3,7 +3,7 @@
 // Platform admin actions. Every one checks platformAdmin() first and is written to the activity log.
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { platformAdmin } from "@/lib/admin";
+import { platformAdmin, platformMember } from "@/lib/admin";
 import * as platform from "@/lib/platform/store";
 import { createMeetLink, isMeetUrl } from "@/lib/platform/meet";
 
@@ -81,7 +81,10 @@ export async function deleteAnnouncement(announcementId: string) {
 
 // ---------------------------------------------------------------- offers
 
-export async function saveOffer(offerId: string | null, input: { title: string; description: string; price: string; cta: string; active: boolean; startAfterDays: number; snoozeDays: number }) {
+export async function saveOffer(
+  offerId: string | null,
+  input: { title: string; description: string; price: string; cta: string; active: boolean; startAfterDays: number; snoozeDays: number; workspaceIds?: string[] },
+) {
   return asAdmin(async () => {
     const o = z
       .object({
@@ -92,9 +95,12 @@ export async function saveOffer(offerId: string | null, input: { title: string; 
         active: z.boolean(),
         startAfterDays: z.number().int().min(0, "0 or more days").max(365),
         snoozeDays: z.number().int().min(1, "At least 1 day").max(365),
+        workspaceIds: z.array(id).max(500).default([]),
       })
       .parse(input);
-    platform.saveOffer(offerId ? id.parse(offerId) : null, { ...o, price: o.price || null });
+    const saved = platform.saveOffer(offerId ? id.parse(offerId) : null, { ...o, price: o.price || null });
+    // Newly picked workspaces see it straight away (no new-account wait).
+    if (o.active) for (const w of o.workspaceIds) if (!platform.offerSentAt(w, saved.id)) platform.sendOffer(w, saved.id);
     return { action: offerId ? "Edited offer" : "Created offer", target: o.title };
   }, ["/dashboard"]);
 }
@@ -121,6 +127,15 @@ export async function reopenOffer(workspaceId: string, offerId: string) {
     platform.reopenOffer(id.parse(workspaceId), id.parse(offerId));
     const title = (await platform.listOffers()).find((o) => o.id === offerId)?.title;
     return { action: "Showed offer again", target: `${await wsName(workspaceId)} · ${title}` };
+  }, ["/dashboard"]);
+}
+
+/** Show an offer on one workspace's Dashboard now. */
+export async function sendOffer(workspaceId: string, offerId: string) {
+  return asAdmin(async () => {
+    platform.sendOffer(id.parse(workspaceId), id.parse(offerId));
+    const title = (await platform.listOffers()).find((o) => o.id === offerId)?.title;
+    return { action: "Sent offer", target: `${await wsName(workspaceId)} · ${title}` };
   }, ["/dashboard"]);
 }
 
@@ -226,4 +241,202 @@ export async function answerMeetingCancelRequest(leadId: string, accept: boolean
     }
     return { action: accept ? "Cancelled meeting (client asked)" : "Declined cancel request", target: meetingLabel(lead) };
   }, ["/dashboard"]);
+}
+
+// ---------------------------------------------------------------- issues
+
+export async function saveIssue(issueId: string, input: { status: string; assigneeId: string | null; adminNote: string }) {
+  return asAdmin(async () => {
+    const issue = await platform.getIssue(id.parse(issueId));
+    if (!issue) throw new Error("Issue not found");
+    const i = z
+      .object({ status: z.enum(["open", "in_progress", "resolved", "closed"]), assigneeId: id.nullable(), adminNote: z.string().trim().max(4000) })
+      .parse(input);
+    if (i.assigneeId && !platform.listTeam().some((m) => m.id === i.assigneeId)) throw new Error("Pick someone on the team");
+    platform.updateIssue(issue.id, { ...i, adminNote: i.adminNote || null });
+    return { action: i.status !== issue.status ? `Marked issue ${i.status.replace("_", " ")}` : "Updated issue", target: `${issue.workspaceName} · ${issue.subject}` };
+  });
+}
+
+/** Answer the reporter: shown under their report in the app (Report an issue). */
+export async function replyToIssue(issueId: string, text: string) {
+  return asAdmin(async (actor) => {
+    const issue = await platform.getIssue(id.parse(issueId));
+    if (!issue) throw new Error("Issue not found");
+    const t = z.string().trim().min(1, "Write the answer").max(2000).parse(text);
+    const by = platform.teamMemberByEmail(actor)?.name ?? "GBPNinja team";
+    platform.updateIssue(issue.id, { reply: { text: t, by, at: new Date().toISOString() }, status: issue.status === "open" ? "in_progress" : issue.status });
+    return { action: "Answered issue", target: `${issue.workspaceName} · ${issue.subject}` };
+  }, ["/"]);
+}
+
+export async function deleteIssue(issueId: string) {
+  return asAdmin(async () => {
+    const issue = await platform.getIssue(id.parse(issueId));
+    platform.deleteIssue(id.parse(issueId));
+    return { action: "Deleted issue", target: issue ? `${issue.workspaceName} · ${issue.subject}` : undefined };
+  }, ["/"]);
+}
+
+// ---------------------------------------------------------------- platform team (admins only)
+
+const teamSchema = z.object({
+  name: z.string().trim().max(80),
+  email: z.string().trim().toLowerCase().email("Enter their email address"),
+  role: z.enum(["admin", "staff"]),
+});
+
+async function asTeamAdmin(fn: (actor: string) => Promise<{ action: string; target?: string; message?: string } | void>) {
+  const me = await platformMember();
+  if (me && me.role !== "admin") return { ok: false as const, error: "Only admins can change the team" };
+  return asAdmin(fn);
+}
+
+export async function addTeamMember(input: { name: string; email: string; role: string }) {
+  return asTeamAdmin(async (actor) => {
+    const m = platform.addTeamMember(teamSchema.parse(input), actor);
+    return { action: `Added ${m.role}`, target: m.email };
+  });
+}
+
+export async function updateTeamMember(memberId: string, input: { name: string; role: string }) {
+  return asTeamAdmin(async () => {
+    const p = teamSchema.pick({ name: true, role: true }).parse(input);
+    const m = platform.updateTeamMember(id.parse(memberId), { role: p.role, ...(p.name ? { name: p.name } : {}) });
+    return { action: "Updated team member", target: m.email };
+  });
+}
+
+export async function removeTeamMember(memberId: string) {
+  return asTeamAdmin(async (actor) => {
+    const m = platform.listTeam().find((t) => t.id === memberId);
+    if (m?.email === actor) throw new Error("You can't remove yourself");
+    platform.removeTeamMember(id.parse(memberId));
+    return { action: "Removed team member", target: m?.email };
+  });
+}
+
+// ---------------------------------------------------------------- platform tasks
+
+type TaskResult = { ok: true; id: string } | { ok: false; error: string };
+const taskFields = {
+  title: z.string().trim().min(1, "Give the task a title").max(200, "Keep the title under 200 characters"),
+  description: z.string().trim().max(5000).nullable(),
+  stage: z.enum(["todo", "in_progress", "in_review", "done"]),
+  priority: z.enum(["urgent", "high", "medium", "low"]),
+  assigneeId: z.string().max(100).nullable(),
+  dueDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid due date")
+    .nullable(),
+  locationId: z.string().max(200).nullable(),
+  order: z.number().finite(),
+};
+
+/** Like asAdmin, but returns the id the task views expect. */
+async function asAdminTask(fn: (actor: string) => Promise<{ id: string; action?: string; target?: string }>): Promise<TaskResult> {
+  let taskId = "";
+  const res = await asAdmin(async (actor) => {
+    const done = await fn(actor);
+    taskId = done.id;
+    return done.action ? { action: done.action, target: done.target } : undefined;
+  });
+  return res.ok ? { ok: true, id: taskId } : res;
+}
+
+const checkRefs = (t: { assigneeId?: string | null }) => {
+  if (t.assigneeId && !platform.listTeam().some((m) => m.id === t.assigneeId)) throw new Error("Pick someone on the team");
+};
+
+export async function createPlatformTask(input: {
+  title: string;
+  description?: string | null;
+  stage: string;
+  priority: string;
+  assigneeId?: string | null;
+  dueDate?: string | null;
+  locationId?: string | null;
+  parentId?: string | null;
+  subtasks?: { title: string; assigneeId?: string | null; dueDate?: string | null }[];
+}) {
+  return asAdminTask(async (actor) => {
+    const data = z
+      .object({
+        ...taskFields,
+        order: taskFields.order.optional(),
+        parentId: z.string().max(200).nullable().optional(),
+        subtasks: z
+          .array(z.object({ title: taskFields.title, assigneeId: taskFields.assigneeId.optional(), dueDate: taskFields.dueDate.optional() }))
+          .max(50)
+          .optional(),
+      })
+      .parse({ description: null, assigneeId: null, dueDate: null, locationId: null, ...input });
+    checkRefs(data);
+    const me = platform.teamMemberByEmail(actor)?.id ?? null;
+    const { subtasks, ...task } = data;
+    const created = platform.createPlatformTask(task, me);
+    for (const [i, s] of (subtasks ?? []).entries()) {
+      checkRefs(s);
+      platform.createPlatformTask({ title: s.title, assigneeId: s.assigneeId ?? null, dueDate: s.dueDate ?? null, stage: "todo", priority: "medium", parentId: created.id, order: i }, me);
+    }
+    return { id: created.id, ...(created.parentId ? {} : { action: "Created task", target: created.title }) };
+  });
+}
+
+export async function updatePlatformTask(taskId: string, patch: Record<string, unknown>) {
+  return asAdminTask(async () => {
+    const data = z.object(taskFields).partial().parse(patch);
+    checkRefs(data);
+    const task = (await platform.listPlatformTasks()).find((t) => t.id === id.parse(taskId));
+    if (!task) throw new Error("Task not found");
+    if (task.parentId) delete data.locationId;
+    platform.updatePlatformTask(task.id, data);
+    if (data.locationId !== undefined) for (const s of (await platform.listPlatformTasks()).filter((t) => t.parentId === task.id)) platform.updatePlatformTask(s.id, { locationId: data.locationId });
+    return { id: task.id, ...(data.stage === "done" && !task.parentId ? { action: "Finished task", target: task.title } : {}) };
+  });
+}
+
+export async function deletePlatformTask(taskId: string) {
+  return asAdminTask(async () => {
+    const task = (await platform.listPlatformTasks()).find((t) => t.id === id.parse(taskId));
+    platform.deletePlatformTask(taskId);
+    return { id: taskId, ...(task && !task.parentId ? { action: "Deleted task", target: task.title } : {}) };
+  });
+}
+
+/** "Add task" on a meeting, issue or workspace: a task linked back to it, assigned to whoever made it. */
+export async function createLinkedTask(kind: "meeting" | "issue" | "workspace", refId: string) {
+  return asAdminTask(async (actor) => {
+    const ref = id.parse(refId);
+    let link: { label: string; href: string; workspaceId: string | null; title: string };
+    if (kind === "meeting") {
+      const l = await platform.getLead(ref);
+      if (!l) throw new Error("Meeting not found");
+      link = { label: `${l.name} · ${l.profileTitle}`, href: `/admin/meetings?meeting=${l.id}`, workspaceId: l.workspaceId, title: `Follow up: meeting with ${l.name}` };
+    } else if (kind === "issue") {
+      const i = await platform.getIssue(ref);
+      if (!i) throw new Error("Issue not found");
+      link = { label: i.subject, href: `/admin/issues?issue=${i.id}`, workspaceId: i.workspaceId, title: `Fix: ${i.subject}` };
+    } else {
+      const w = await platform.getWorkspace(ref);
+      if (!w) throw new Error("Workspace not found");
+      link = { label: w.name, href: `/admin/workspaces/${encodeURIComponent(w.id)}`, workspaceId: w.id, title: `Follow up with ${w.name}` };
+    }
+    const tasks = await platform.listPlatformTasks();
+    const open = tasks.find((t) => t.source?.type === "platform" && t.source.kind === kind && t.source.refId === ref && t.stage !== "done");
+    if (open) return { id: open.id };
+    const me = platform.teamMemberByEmail(actor)?.id ?? null;
+    const t = platform.createPlatformTask(
+      {
+        title: link.title.slice(0, 200),
+        stage: "todo",
+        priority: kind === "issue" ? "high" : "medium",
+        assigneeId: me,
+        locationId: link.workspaceId,
+        source: { type: "platform", kind, refId: ref, label: link.label, href: link.href },
+      },
+      me,
+    );
+    return { id: t.id, action: "Created task", target: t.title };
+  });
 }

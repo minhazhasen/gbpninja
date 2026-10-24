@@ -4,7 +4,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Activity, ArrowLeft, Building2, Gauge, Megaphone, Menu, Moon, PlugZap, ShieldCheck, Sun, Tag, X } from "lucide-react";
+import { Activity, ArrowLeft, Bug, Building2, CalendarClock, Gauge, ListTodo, Megaphone, Menu, Moon, PlugZap, ShieldCheck, Sun, Tag, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV: {
@@ -13,7 +13,7 @@ const NAV: {
     href: string;
     label: string;
     icon: React.ElementType;
-    badge?: "leads";
+    badge?: keyof AdminBadges;
   }[];
 }[] = [
   { label: "", items: [{ href: "/admin", label: "Overview", icon: Gauge }] },
@@ -21,7 +21,16 @@ const NAV: {
     label: "Customers",
     items: [
       { href: "/admin/workspaces", label: "Workspaces", icon: Building2 },
-      { href: "/admin/offers", label: "Offers", icon: Tag, badge: "leads" },
+      { href: "/admin/offers", label: "Offers", icon: Tag },
+      { href: "/admin/meetings", label: "Meetings", icon: CalendarClock, badge: "meetings" },
+      { href: "/admin/issues", label: "Issues", icon: Bug, badge: "issues" },
+    ],
+  },
+  {
+    label: "Team",
+    items: [
+      { href: "/admin/tasks", label: "Tasks", icon: ListTodo, badge: "tasks" },
+      { href: "/admin/team", label: "Team", icon: Users },
     ],
   },
   {
@@ -34,7 +43,14 @@ const NAV: {
   },
 ];
 
-export function AdminShell({ admin, newLeads, children }: { admin: string; newLeads: number; children: React.ReactNode }) {
+/** Sidebar counts: upcoming meetings, open issues, my open tasks. */
+export interface AdminBadges {
+  meetings: number;
+  issues: number;
+  tasks: number;
+}
+
+export function AdminShell({ admin, badges, children }: { admin: string; badges: AdminBadges; children: React.ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [pathname]);
@@ -68,7 +84,7 @@ export function AdminShell({ admin, newLeads, children }: { admin: string; newLe
             <ul className="flex flex-col gap-0.5">
               {sec.items.map((item) => {
                 const active = item.href === "/admin" ? pathname === "/admin" : pathname === item.href || pathname.startsWith(`${item.href}/`);
-                const count = item.badge === "leads" ? newLeads : 0;
+                const count = item.badge ? badges[item.badge] : 0;
                 return (
                   <li key={item.href}>
                     <Link

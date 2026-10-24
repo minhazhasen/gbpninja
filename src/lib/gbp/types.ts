@@ -523,6 +523,8 @@ export interface Task {
     | { type: "review"; reviewId: string; reviewer: string; rating: StarRating; excerpt?: string | null }
     /** From the profile audit's optimization checklist; done automatically once the check passes. */
     | { type: "audit"; checkId: string; section: string }
+    /** Platform admin tasks only: the meeting, issue or workspace it's about. */
+    | { type: "platform"; kind: "meeting" | "issue" | "workspace"; refId: string; label: string; href: string }
     | null;
   createdAt: string;
   createdBy?: string | null;

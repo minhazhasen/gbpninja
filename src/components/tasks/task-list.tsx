@@ -17,13 +17,13 @@ const COL = { priority: "lg:w-24", due: "lg:w-28", assignee: "lg:w-40", meta: "l
 
 const listOrder = (a: Task, b: Task) => (dueIn(a) ?? 9999) - (dueIn(b) ?? 9999) || PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || byOrder(a, b);
 
-export function TaskList({ tasks, subtasksOf, memberOf, onOpen, onToggleDone, onNew, filtered }: TaskViewProps & { filtered: boolean }) {
+export function TaskList({ tasks, subtasksOf, memberOf, scopeOf, emptyHint, onOpen, onToggleDone, onNew, filtered }: TaskViewProps & { filtered: boolean }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ done: true });
 
   if (!tasks.length)
     return (
       <Card>
-        <EmptyState title={filtered ? "No tasks match these filters" : "No tasks yet"}>{filtered ? "Try another filter or search." : "Create a task, or wait for review follow-ups to show up here."}</EmptyState>
+        <EmptyState title={filtered ? "No tasks match these filters" : "No tasks yet"}>{filtered ? "Try another filter or search." : (emptyHint ?? "Create a task, or wait for review follow-ups to show up here.")}</EmptyState>
       </Card>
     );
 
@@ -68,7 +68,7 @@ export function TaskList({ tasks, subtasksOf, memberOf, onOpen, onToggleDone, on
             {!isCollapsed && (
               <ul className="divide-y border-t">
                 {rows.map((t) => (
-                  <TaskRow key={t.id} task={t} subtasks={subtasksOf(t.id)} assignee={memberOf(t.assigneeId)} onOpen={() => onOpen(t)} onToggle={() => onToggleDone(t)} />
+                  <TaskRow key={t.id} task={t} subtasks={subtasksOf(t.id)} assignee={memberOf(t.assigneeId)} scope={scopeOf(t.locationId)} onOpen={() => onOpen(t)} onToggle={() => onToggleDone(t)} />
                 ))}
                 {!rows.length && <li className="px-5 py-3 text-sm text-muted-foreground">Nothing here</li>}
               </ul>
@@ -80,7 +80,21 @@ export function TaskList({ tasks, subtasksOf, memberOf, onOpen, onToggleDone, on
   );
 }
 
-function TaskRow({ task: t, subtasks, assignee, onOpen, onToggle }: { task: Task; subtasks: Task[]; assignee: ReturnType<TaskViewProps["memberOf"]>; onOpen: () => void; onToggle: () => void }) {
+function TaskRow({
+  task: t,
+  subtasks,
+  assignee,
+  scope,
+  onOpen,
+  onToggle,
+}: {
+  task: Task;
+  subtasks: Task[];
+  assignee: ReturnType<TaskViewProps["memberOf"]>;
+  scope: string | null;
+  onOpen: () => void;
+  onToggle: () => void;
+}) {
   const done = t.stage === "done";
   return (
     <li
@@ -96,11 +110,11 @@ function TaskRow({ task: t, subtasks, assignee, onOpen, onToggle }: { task: Task
       <div className="min-w-0 flex-1 lg:flex lg:items-center lg:gap-4">
         <div className="min-w-0 flex-1">
           <p className={cn("truncate text-sm font-medium", done && "text-muted-foreground line-through")}>{t.title}</p>
-          {(t.source || subtasks.length > 0 || !t.locationId) && (
+          {(t.source || subtasks.length > 0 || scope) && (
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <SourceBadge task={t} />
               <SubtaskCount subtasks={subtasks} />
-              {!t.locationId && <span className="text-xs text-muted-foreground">All locations</span>}
+              {scope && <span className="truncate text-xs text-muted-foreground">{scope}</span>}
             </div>
           )}
         </div>
