@@ -7,7 +7,9 @@ import { useEffect, useMemo, useState } from "react";
 import { format, parseISO } from "date-fns";
 import { toast } from "sonner";
 import { ArrowDown, ArrowDownRight, ArrowUp, ArrowUpRight, ChevronDown, ChevronsUpDown, Copy, Search } from "lucide-react";
+import { ExportCsvButton } from "@/components/export-csv-button";
 import { Card, PanelHeader, buttonClass, inputClass } from "@/components/ui";
+import { csvFilename } from "@/lib/csv";
 import {
   compareKeywords,
   defaultKeywordMonths,
@@ -23,6 +25,7 @@ import { cn } from "@/lib/utils";
 
 const PAGE = 25;
 const monthLabel = (ym: string) => format(parseISO(`${ym}-01`), "MMM yyyy");
+const csvCount = (c: KeywordCount | null) => (!c ? "" : c.impressions != null ? c.impressions : c.threshold != null ? `<${c.threshold}` : 0);
 
 export function SearchQueriesPanel({ months }: { months: KeywordMonth[] }) {
   const ids = useMemo(() => months.map((m) => m.month), [months]);
@@ -72,7 +75,27 @@ export function SearchQueriesPanel({ months }: { months: KeywordMonth[] }) {
 
   return (
     <Card className="min-w-0 overflow-hidden">
-      <PanelHeader title="Search queries" meta={ids.length ? rows.length.toLocaleString() : undefined} />
+      <PanelHeader
+        title="Search queries"
+        meta={ids.length ? rows.length.toLocaleString() : undefined}
+        action={
+          active && (
+            <ExportCsvButton
+              filename={csvFilename("search-queries", active, compare ? `vs-${compare}` : null)}
+              what="search queries"
+              // Exact counts as numbers; Google's hidden small counts as "<15".
+              rows={() => [
+                ["Search query", monthLabel(active), ...(compare ? [monthLabel(compare), "Change %"] : [])],
+                ...rows.map((r) => [
+                  r.keyword,
+                  csvCount(r.active),
+                  ...(compare ? [csvCount(r.prior), r.change === "new" ? "New" : r.change] : []),
+                ]),
+              ]}
+            />
+          )
+        }
+      />
       {ids.length === 0 ? (
         <p className="px-5 py-8 text-sm text-muted-foreground lg:px-6">No search query data yet</p>
       ) : (

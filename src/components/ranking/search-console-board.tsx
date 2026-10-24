@@ -9,11 +9,13 @@ import { ArrowDown, ArrowUp, Check, Copy, Globe, Minus, Search, TrendingDown, Tr
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { SearchConsoleIcon } from "@/components/brand-icons";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { ExportCsvButton } from "@/components/export-csv-button";
 import { Card, EmptyState, PageHeader, PanelHeader, StatStrip, buttonClass, inputClass } from "@/components/ui";
+import { csvFilename } from "@/lib/csv";
 import { GoogleConnectButton, propertyLabel } from "@/components/settings/search-console-card";
 import { connectSearchConsole } from "@/app/(app)/actions";
 import { rangeFromParams, rangeToParams, type DateRangeValue } from "@/lib/date-ranges";
-import type { SearchConsoleConnection, SearchConsoleQueryRow, SearchConsoleReport } from "@/lib/gbp/types";
+import type { SearchConsoleConnection, SearchConsoleMetrics, SearchConsoleQueryRow, SearchConsoleReport } from "@/lib/gbp/types";
 import { queryHref } from "@/lib/search-console";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +26,9 @@ export const pct = (n: number) => `${(n * 100).toFixed(1)}%`;
 export const pctChange = (now: number, before?: number | null) => (before ? Math.round(((now - before) / before) * 100) : null);
 
 type SortKey = "query" | "position" | "clicks" | "impressions" | "ctr";
+
+const csvPct = (v: number) => Math.round(v * 1000) / 10;
+const csvPos = (m: SearchConsoleMetrics) => (m.impressions ? Math.round(m.position * 10) / 10 : "");
 
 export function SearchConsoleBoard({
   location,
@@ -225,9 +230,26 @@ export function SearchConsoleBoard({
           title="Searches"
           meta={report.queries.length}
           action={
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search queries" aria-label="Search queries" className={cn(inputClass, "h-9 w-44 py-1.5 pl-9 sm:w-60")} />
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search queries" aria-label="Search queries" className={cn(inputClass, "h-9 w-36 py-1.5 pl-9 sm:w-60")} />
+              </div>
+              <ExportCsvButton
+                filename={csvFilename("searches", location.title, report.from, "to", report.to)}
+                what="searches"
+                rows={() => [
+                  ["Search query", "Clicks", "Impressions", "CTR %", "Avg position", ...(report.prevTotals ? ["Previous clicks", "Previous impressions", "Previous CTR %", "Previous avg position"] : [])],
+                  ...rows.map((r) => [
+                    r.query,
+                    r.clicks,
+                    r.impressions,
+                    csvPct(r.ctr),
+                    csvPos(r),
+                    ...(report.prevTotals ? [r.prev?.clicks ?? 0, r.prev?.impressions ?? 0, r.prev ? csvPct(r.prev.ctr) : "", r.prev ? csvPos(r.prev) : ""] : []),
+                  ]),
+                ]}
+              />
             </div>
           }
         />

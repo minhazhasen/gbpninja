@@ -7,7 +7,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ExternalLink, Minus, Monitor, Smartphone, Tablet, TrendingDown, TrendingUp } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { DateRangePicker } from "@/components/date-range-picker";
+import { ExportCsvButton } from "@/components/export-csv-button";
 import { Card, EmptyState, PageHeader, PanelHeader, StatStrip, buttonClass } from "@/components/ui";
+import { csvFilename } from "@/lib/csv";
 import { Segmented } from "@/components/ui-client";
 import { propertyLabel } from "@/components/settings/search-console-card";
 import { rangeFromParams, rangeToParams, type DateRangeValue } from "@/lib/date-ranges";
@@ -265,7 +267,20 @@ export function SearchQueryDetail({ location, detail }: { location: { id: string
           </div>
 
           <Card className="overflow-hidden">
-            <PanelHeader title="By day" meta={`${seen.length} of ${detail.daily.length} days with impressions`} />
+            <PanelHeader
+              title="By day"
+              meta={`${seen.length} of ${detail.daily.length} days with impressions`}
+              action={
+                <ExportCsvButton
+                  filename={csvFilename("search", detail.query, location.title, detail.from, "to", detail.to)}
+                  what="days"
+                  rows={() => [
+                    ["Date", "Search query", "Clicks", "Impressions", "CTR %", "Avg position"],
+                    ...days.map((d) => [d.date, detail.query, d.clicks, d.impressions, Math.round(d.ctr * 1000) / 10, d.impressions ? Math.round(d.position * 10) / 10 : ""]),
+                  ]}
+                />
+              }
+            />
             <table className="w-full table-fixed text-sm">
               <colgroup>
                 <col className="w-[34%] sm:w-[30%]" />

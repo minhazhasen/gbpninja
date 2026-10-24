@@ -1,8 +1,11 @@
+import { format } from "date-fns";
+import { ExportCsvButton } from "@/components/export-csv-button";
 import { ChartLegend, MetricsChart } from "@/components/metrics-chart";
 import { PerformanceControls } from "@/components/performance/performance-controls";
 import { SearchQueriesPanel } from "@/components/performance/search-queries-panel";
 import { SyncIssues } from "@/components/sync-issues";
 import { Card, PanelHeader, PillTabs, StatStrip } from "@/components/ui";
+import { csvFilename } from "@/lib/csv";
 import { rangeFromParams } from "@/lib/date-ranges";
 import { getProvider } from "@/lib/gbp";
 import { mergeKeywordMonths } from "@/lib/keywords";
@@ -32,6 +35,17 @@ export default async function PerformancePage({ searchParams }: Props) {
   ]);
   const { cur, before, chart, start } = rangeView(perLocation, range, series);
   const issues = (await provider.getSyncIssues?.(picked.map((l) => l.id))) ?? [];
+  // CSV: one row per location per day in the picked range (newest first).
+  const ymd = (d: Date) => format(d, "yyyy-MM-dd");
+  const fromDay = range.from ? ymd(range.from) : "", toDay = ymd(range.to);
+  const csvRows = [
+    ["Date", "Location", "Profile views", "Search views", "Maps views", "Calls", "Website clicks", "Directions", "Interactions"],
+    ...picked
+      .flatMap((l, i) => perLocation[i].filter((p) => p.date >= fromDay && p.date <= toDay).map((p) => ({ l, p })))
+      .sort((a, b) => b.p.date.localeCompare(a.p.date) || a.l.title.localeCompare(b.l.title))
+      .map(({ l, p }) => [p.date, l.title, p.impressions, p.searchImpressions, p.mapsImpressions, p.calls, p.websiteClicks, p.directions, p.calls + p.websiteClicks + p.directions]),
+  ];
+  const csvName = csvFilename("performance", picked.length === 1 ? picked[0].title : `${picked.length}-locations`, fromDay || "all-time", "to", toDay);
 
   const qs = (extra: Record<string, string>) => `?${new URLSearchParams({ ...(Object.fromEntries(Object.entries(sp).filter(([, v]) => v != null)) as Record<string, string>), ...extra })}`;
   const stat = (key: SeriesKey, hint?: string) => ({
@@ -47,7 +61,10 @@ export default async function PerformancePage({ searchParams }: Props) {
     <div className="space-y-5 pb-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-2xl font-semibold tracking-tight">Performance</h1>
-        <PerformanceControls locations={locations.map(({ id, title }) => ({ id, title }))} scope={scope} />
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <PerformanceControls locations={locations.map(({ id, title }) => ({ id, title }))} scope={scope} />
+          <ExportCsvButton filename={csvName} rows={csvRows} what="days" className="self-start sm:self-auto" />
+        </div>
       </div>
 
       <SyncIssues issues={issues} />

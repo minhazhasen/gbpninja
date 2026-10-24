@@ -18,6 +18,7 @@ import { RequestReviewDialog, ReviewDialog, type ReviewRow } from "@/components/
 import { updateReview, updateReviewRequest } from "@/app/(app)/actions";
 import { makeRange, previousRange, rangeLabel, type DateRangeValue } from "@/lib/date-ranges";
 import type { EmailSender, MessageTemplate, ReviewRequest, ReviewRequestStatus, TeamMember } from "@/lib/gbp/types";
+import { csvFilename } from "@/lib/csv";
 import { serializeLocationScope } from "@/lib/location-scope";
 import {
   FOLLOW_UP_LABEL,
@@ -233,15 +234,18 @@ export function ReviewsBoard({
   };
 
   const exportCsv = () => {
+    const name = (what: string) => csvFilename(what, singleLocation?.title ?? (locations.length > 1 ? "all-locations" : locations[0]?.title), format(new Date(), "yyyy-MM-dd"));
     if (view === "requests") {
-      downloadCsv("review-requests.csv", [
+      if (!reqRows.length) return void toast.error("Nothing to export");
+      downloadCsv(name("review-requests"), [
         ["Date", "Customer", "Email", "Phone", "Method", "Location", "Status", "Rating"],
         ...reqRows.map((r) => [r.createdAt, r.name, r.email, r.phone, METHOD_LABEL[r.method], r.locationTitle, requestInfo(r.status).label, r.rating]),
       ]);
       toast.success(`Exported ${reqRows.length} rows`);
       return;
     }
-    downloadCsv("reviews.csv", [
+    if (!rows.length) return void toast.error("Nothing to export");
+    downloadCsv(name("reviews"), [
       ["Date", "Reviewer", "Location", "Rating", "Comment", "Team member", "Source", "Reply", "Replied at", "Follow-up", "Hidden"],
       ...rows.map((r) => [
         r.createTime,
@@ -296,7 +300,7 @@ export function ReviewsBoard({
             items={[
               { label: "Request reviews", icon: Send, onSelect: () => setAskOpen(true) },
               { label: `Copy review link${linkFor && locations.length > 1 ? ` · ${linkFor.title}` : ""}`, icon: Link2, onSelect: copyLink },
-              { label: "Export CSV", icon: Download, onSelect: exportCsv, separator: true },
+              { label: view === "requests" ? "Export requests (CSV)" : "Export reviews (CSV)", icon: Download, onSelect: exportCsv, separator: true },
             ]}
           />
         </div>

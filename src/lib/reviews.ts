@@ -163,19 +163,5 @@ export const METHOD_LABEL: Record<ReviewRequestMethod, string> = { email: "Email
 /** Google's "write a review" link for a place. */
 export const reviewLink = (placeId?: string | null) => (placeId ? `https://search.google.com/local/writereview?placeid=${encodeURIComponent(placeId)}` : null);
 
-// ---------------------------------------------------------------- CSV
-export function downloadCsv(filename: string, rows: (string | number | null | undefined)[][]) {
-  const esc = (v: string | number | null | undefined) => {
-    let s = v == null ? "" : String(v);
-    // Review text is public input: stop spreadsheets from running it as a formula.
-    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
-  const blob = new Blob([rows.map((r) => r.map(esc).join(",")).join("\n")], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+// CSV export lives in lib/csv.ts (shared with Performance and Ranking).
+export { downloadCsv } from "@/lib/csv";
