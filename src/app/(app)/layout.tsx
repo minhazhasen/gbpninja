@@ -1,5 +1,6 @@
 import { needsReply } from "@/lib/reviews";
 import { Suspense } from "react";
+import { after } from "next/server";
 import { AppShell, type ShellLocation } from "@/components/app-shell";
 import { auditLocation } from "@/lib/audit";
 import { getProvider } from "@/lib/gbp";
@@ -7,6 +8,7 @@ import { isPlatformAdmin } from "@/lib/admin";
 import { getSessionUser } from "@/lib/current-user";
 import { NoAccess } from "@/components/no-access";
 import { activeAnnouncement, currentWorkspaceId, getWorkspace } from "@/lib/platform/store";
+import { publishDueSoon } from "@/lib/publish-due";
 
 // Profile data changes outside this app (new reviews, edits on Google), so never prerender.
 export const dynamic = "force-dynamic";
@@ -19,6 +21,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   }
   // A workspace the platform admin suspended can't be used (Admin → Workspaces → Reactivate).
   if ((await getWorkspace(await currentWorkspaceId()))?.status === "suspended") return <NoAccess email={(await getSessionUser())?.email ?? null} suspended />;
+  // Scheduled posts that are due go out now (the cron route is the main trigger; this covers gaps while people use the app).
+  after(publishDueSoon);
   const provider = await getProvider();
   const posts = await provider.listPosts();
   const [locations, tasks] = await Promise.all([provider.listLocations(), provider.listTasks()]);

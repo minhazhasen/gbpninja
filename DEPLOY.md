@@ -55,7 +55,7 @@ Don't press *Run NPM Install* — the archive already contains the `node_modules
 | `GOOGLE_REDIRECT_URI` | `https://app.gbpninja.com/` (must be listed on the OAuth client) |
 | `GBP_DATA_SOURCE` | `google` — real Business Profiles and data saved in the database (`mock` = sample data, nothing saved). Check with `/api/health` |
 | `PLATFORM_ADMIN_EMAILS` | your sign-in email(s), comma-separated |
-| `CRON_SECRET` | a random value; daily cron: `curl -H "Authorization: Bearer <CRON_SECRET>" https://app.gbpninja.com/api/cron/refresh-competitors` |
+| `CRON_SECRET` | a random value; daily cron: `curl -H "Authorization: Bearer <CRON_SECRET>" https://app.gbpninja.com/api/cron/refresh-competitors`; every 5 minutes (scheduled posts): `curl -H "Authorization: Bearer <CRON_SECRET>" https://app.gbpninja.com/api/cron/publish-posts` |
 | `META_APP_ID`, `META_APP_SECRET`, `META_LOGIN_CONFIG_ID` | the Meta app (Facebook Page + Instagram publishing) |
 | `META_REDIRECT_URI` | `https://app.gbpninja.com/api/oauth/meta/callback` (listed in the Meta app's Valid OAuth Redirect URIs) |
 | `APP_URL` | `https://app.gbpninja.com` — Instagram fetches post images from `APP_URL/api/media/…` (files in `~/gbpninja-data/media`) |

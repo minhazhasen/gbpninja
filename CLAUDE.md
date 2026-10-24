@@ -262,11 +262,13 @@ The UI matches the **TasksBook CRM marketing section** (shadcn/ui look, ported t
 - GBP APIs require an approved access request for the Cloud project (quota is 0 until approved).
 - Performance: `businessprofileperformance.googleapis.com` `fetchMultiDailyMetricsTimeSeries`.
 - Reviews and local posts are still on the v4 `mybusiness.googleapis.com` API.
-- Posts can't be scheduled natively — store in `ScheduledPost` and publish via a cron route.
+- Posts can't be scheduled natively: scheduled posts stay in the workspace and `src/lib/publish-due.ts` publishes them when due
+  (`/api/cron/publish-posts`, Bearer `CRON_SECRET`, every 5 minutes; fallback `after(publishDueSoon)` in the app layout, once a minute
+  per process). Posts more than 24 h late are skipped (they stay scheduled in the past).
 
 ## Roadmap
 1. Implement `google.ts` provider (accounts → locations → reviews → metrics → posts).
-2. Persist scheduled posts in Prisma + `/api/cron/publish-posts` route.
+2. Persist scheduled posts in Prisma (publishing them on time is done: `/api/cron/publish-posts`).
 3. AI-generated review replies and post drafts (Claude API).
 4. Audit history (`AuditSnapshot`) and score trend chart.
 5. Multi-account / agency mode, roles, and Postgres for production.
