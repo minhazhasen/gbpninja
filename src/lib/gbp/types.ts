@@ -462,7 +462,7 @@ export interface SearchConsoleQueryDetail {
 export interface SyncIssue {
   locationId: string;
   title: string;
-  area: "insights" | "keywords" | "reviews" | "photos" | "posts" | "attributes";
+  area: "profile" | "insights" | "keywords" | "reviews" | "photos" | "posts" | "attributes";
   message: string;
 }
 

@@ -29,7 +29,7 @@ export default async function AuditPage({ searchParams }: { searchParams: Promis
   const rating = { avg: visible.length ? visible.reduce((s, r) => s + r.rating, 0) / visible.length : null, count: visible.length };
   const initialTab = (AUDIT_TABS as readonly string[]).includes(tab ?? "") ? (tab as AuditTab) : "overview";
   // Live mode: photos / attributes that couldn't be loaded from Google (the rest of the audit still works).
-  const photoIssues = ((await provider.getSyncIssues?.([location.id])) ?? []).filter((i) => i.area === "photos" || i.area === "attributes");
+  const photoIssues = ((await provider.getSyncIssues?.([location.id])) ?? []).filter((i) => i.area === "photos" || i.area === "attributes" || i.area === "profile");
   return (
     <>
     {photoIssues.length > 0 && (

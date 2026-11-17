@@ -265,6 +265,10 @@ The UI matches the **TasksBook CRM marketing section** (shadcn/ui look, ported t
 - Posts can't be scheduled natively: scheduled posts stay in the workspace and `src/lib/publish-due.ts` publishes them when due
   (`/api/cron/publish-posts`, Bearer `CRON_SECRET`, every 5 minutes; fallback `after(publishDueSoon)` in the app layout, once a minute
   per process). Posts more than 24 h late are skipped (they stay scheduled in the past).
+- Background jobs (production only, `startBackgroundJobs` in `src/instrumentation-node.ts`): due posts every minute, daily database
+  backup (`src/lib/backup.ts`: `VACUUM INTO` → `<data dir>/backups/app-YYYY-MM-DD.db`, 14 kept). Google access removed
+  (invalid_grant): `listLocations` keeps the saved profiles and records a `profile` sync issue; `SyncIssues` then shows one
+  "Reconnect Google" notice instead of the error.
 
 ## Roadmap
 1. Implement `google.ts` provider (accounts → locations → reviews → metrics → posts).

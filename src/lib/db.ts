@@ -57,6 +57,16 @@ export const db = {
   exec(sql: string) {
     open().exec(sql);
   },
+  /** The database file on disk (absolute), or null for a relative dev path. */
+  file() {
+    const url = process.env.DATABASE_URL ?? "";
+    const f = url.startsWith("file:") ? url.slice(5) : "";
+    return f ? (path.isAbsolute(f) ? f : path.join(process.cwd(), "prisma", f)) : null;
+  },
+  /** A consistent copy of the whole database (safe while the app is writing), written to `target`. */
+  backupTo(target: string) {
+    open().exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+  },
   /** AppState documents (src/lib/gbp/persist.ts). */
   getState(key: string): string | null {
     const row = open().prepare('SELECT "value" FROM "AppState" WHERE "key" = ?').get(key) as { value: string } | undefined;

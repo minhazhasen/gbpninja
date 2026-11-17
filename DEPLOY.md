@@ -79,3 +79,19 @@ Save → *Restart*. The app creates its database tables on start (`src/instrumen
 - **Health:** `https://app.gbpninja.com/api/health` shows the app's threads and memory (expect ~9 threads, ~200 MB).
 - **Smoke test:** `https://app.gbpninja.com/privacy` (public) loads, `/dashboard` redirects to `/login`, sign-in works, Settings → connect Gmail.
 - **Logs:** cPanel → Setup Node.js App → the app's `stderr.log` in the app root.
+
+## Background jobs and backups
+
+While the server runs in production (`src/instrumentation-node.ts`):
+- Every minute: publishes scheduled posts that are due (`src/lib/publish-due.ts`). Still add the cron job below; it is the main
+  trigger and wakes the app if the host has put it to sleep.
+- Once a day: a copy of the database in `~/gbpninja-data/backups/app-YYYY-MM-DD.db` (newest 14 kept). Uploaded media in
+  `~/gbpninja-data/media` isn't copied: include `~/gbpninja-data` in the host's backups.
+
+cPanel → Cron Jobs → Common settings "Once per five minutes" (`*/5 * * * *`), command:
+
+    curl -s -H "Authorization: Bearer <CRON_SECRET>" https://app.gbpninja.com/api/cron/publish-posts > /dev/null
+
+and once a day (`0 4 * * *`):
+
+    curl -s -H "Authorization: Bearer <CRON_SECRET>" https://app.gbpninja.com/api/cron/refresh-competitors > /dev/null

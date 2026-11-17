@@ -811,7 +811,16 @@ const hoursTypeId = (label: string) =>
 const live: Partial<GbpProvider> = {
   async listLocations() {
     if (!(await googleAccount("gbp"))) return [];
-    await refreshLocations();
+    // Google refused (e.g. access removed): keep the last copy of the profiles and say why on the page instead of failing it.
+    try {
+      await refreshLocations();
+      for (const l of workspace.locations) delete (cache().issues ??= {})[`${l.id}|profile`];
+    } catch (e) {
+      if (!workspace.locations.length) throw e;
+      const issues = (cache().issues ??= {});
+      for (const l of workspace.locations) issues[`${l.id}|profile`] = e instanceof Error ? e.message : String(e);
+      return workspace.locations;
+    }
     for (const l of workspace.locations) {
       await guard(l.id, "attributes", () => refreshAttributes(l), undefined);
       await guard(l.id, "photos", () => refreshPhotos(l.id), undefined);
