@@ -36,18 +36,19 @@ const NAV: {
   {
     label: "Platform",
     items: [
-      { href: "/admin/integrations", label: "Integrations", icon: PlugZap },
+      { href: "/admin/integrations", label: "Integrations", icon: PlugZap, badge: "integrations" },
       { href: "/admin/announcements", label: "Announcements", icon: Megaphone },
       { href: "/admin/activity", label: "Activity", icon: Activity },
     ],
   },
 ];
 
-/** Sidebar counts: upcoming meetings, open issues, my open tasks. */
+/** Sidebar counts: upcoming meetings, open issues, my open tasks, required app settings missing or scheduled jobs failing. */
 export interface AdminBadges {
   meetings: number;
   issues: number;
   tasks: number;
+  integrations: number;
 }
 
 export function AdminShell({ admin, badges, children }: { admin: string; badges: AdminBadges; children: React.ReactNode }) {

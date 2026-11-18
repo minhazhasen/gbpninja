@@ -8,7 +8,10 @@ import { platformAdminEmails } from "@/lib/admin";
 import { lastJobRun, type JobName } from "@/lib/job-runs";
 import { latestBackup } from "@/lib/backup";
 
-export type SetupGroup = "Sign-in & data" | "Social networks" | "Scheduled jobs";
+/** The apps the platform runs on (one card each on Admin → Integrations), the server itself, and the scheduled jobs. */
+export type SetupGroup = "Google" | "Firebase" | "Meta" | "LinkedIn" | "Server" | "Scheduled jobs";
+export const APP_GROUPS = ["Google", "Firebase", "Meta", "LinkedIn"] as const;
+export type AppGroup = (typeof APP_GROUPS)[number];
 
 export interface SetupItem {
   label: string;
@@ -51,21 +54,20 @@ export async function setupChecklist(): Promise<SetupItem[]> {
   const backupRun = lastJobRun("backup");
   const backupFresh = !!backup && Date.now() - new Date(backup.at).getTime() < 26 * 3_600_000;
   return [
-    // ---------------------------------------------------------------- sign-in & data
-    { group: "Sign-in & data", label: "Session secret", ok: has("SESSION_SECRET"), hint: "SESSION_SECRET", note: "Signs sign-in cookies and encrypts saved Google, Meta and LinkedIn tokens." },
-    { group: "Sign-in & data", label: "Firebase sign-in", ok: has(...firebase), hint: "NEXT_PUBLIC_FIREBASE_* (API key, auth domain, project id, app id)", note: "Login with Google and email. Without it the app is an open demo." },
-    { group: "Sign-in & data", label: "Google OAuth client", ok: has(...CHANNEL_ENV.google), hint: CHANNEL_ENV.google.join(" / "), note: "Connect Business Profiles, Gmail and Search Console." },
-    publicUrl("Sign-in & data", "Google redirect link", "GOOGLE_REDIRECT_URI", "Must match the link on the Google OAuth client (the site's address + \"/\")."),
-    { group: "Sign-in & data", label: "Live Google data", ok: !isDemo(), hint: "GBP_DATA_SOURCE=google", note: isDemo() ? "Showing sample data." : "Real Business Profile data." },
-    publicUrl("Sign-in & data", "Public address", "APP_URL", "For invite links and photos/videos sent to Google and Instagram."),
-    { group: "Sign-in & data", label: "Database", ok: has("DATABASE_URL"), hint: "DATABASE_URL", note: "SQLite file for workspaces, tokens and settings." },
-    { group: "Sign-in & data", label: "Platform admins", ok: platformAdminEmails().length > 0, hint: "PLATFORM_ADMIN_EMAILS", note: `${platformAdminEmails().length} listed` },
+    // ---------------------------------------------------------------- apps and the server
+    { group: "Server", label: "Session secret", ok: has("SESSION_SECRET"), hint: "SESSION_SECRET", note: "Signs sign-in cookies and encrypts saved Google, Meta and LinkedIn tokens." },
+    { group: "Firebase", label: "Firebase sign-in", ok: has(...firebase), hint: "NEXT_PUBLIC_FIREBASE_* (API key, auth domain, project id, app id)", note: "Login with Google and email. Without it the app is an open demo." },
+    { group: "Google", label: "OAuth client", ok: has(...CHANNEL_ENV.google), hint: CHANNEL_ENV.google.join(" / "), note: "Connect Business Profiles, Gmail and Search Console." },
+    publicUrl("Google", "Redirect link", "GOOGLE_REDIRECT_URI", "Must match the link on the Google OAuth client (the site's address + \"/\")."),
+    { group: "Google", label: "Live Google data", ok: !isDemo(), hint: "GBP_DATA_SOURCE=google", note: isDemo() ? "Showing sample data." : "Real Business Profile data." },
+    publicUrl("Server", "Public address", "APP_URL", "For invite links and photos/videos sent to Google and Instagram."),
+    { group: "Server", label: "Database", ok: has("DATABASE_URL"), hint: "DATABASE_URL", note: "SQLite file for workspaces, tokens and settings." },
+    { group: "Server", label: "Platform admins", ok: platformAdminEmails().length > 0, hint: "PLATFORM_ADMIN_EMAILS", note: `${platformAdminEmails().length} listed` },
 
-    // ---------------------------------------------------------------- social networks (optional)
-    { group: "Social networks", label: "Meta app (Facebook + Instagram)", optional: true, ok: has(...CHANNEL_ENV.facebook, "META_LOGIN_CONFIG_ID"), hint: "META_APP_ID / META_APP_SECRET / META_LOGIN_CONFIG_ID", note: "Posting to Facebook Pages and Instagram." },
-    publicUrl("Social networks", "Meta redirect link", "META_REDIRECT_URI", "<site>/api/oauth/meta/callback, also listed in the Meta app.", true),
-    { group: "Social networks", label: "LinkedIn app", optional: true, ok: has(...CHANNEL_ENV.linkedin), hint: CHANNEL_ENV.linkedin.join(" / "), note: "Posting to LinkedIn." },
-    publicUrl("Social networks", "LinkedIn redirect link", "LINKEDIN_REDIRECT_URI", "<site>/api/oauth/linkedin/callback, also listed in the LinkedIn app.", true),
+    { group: "Meta", label: "Meta app", optional: true, ok: has(...CHANNEL_ENV.facebook, "META_LOGIN_CONFIG_ID"), hint: "META_APP_ID / META_APP_SECRET / META_LOGIN_CONFIG_ID", note: "Posting to Facebook Pages and Instagram." },
+    publicUrl("Meta", "Redirect link", "META_REDIRECT_URI", "<site>/api/oauth/meta/callback, also listed in the Meta app.", true),
+    { group: "LinkedIn", label: "LinkedIn app", optional: true, ok: has(...CHANNEL_ENV.linkedin), hint: CHANNEL_ENV.linkedin.join(" / "), note: "Posting to LinkedIn." },
+    publicUrl("LinkedIn", "Redirect link", "LINKEDIN_REDIRECT_URI", "<site>/api/oauth/linkedin/callback, also listed in the LinkedIn app.", true),
 
     // ---------------------------------------------------------------- scheduled jobs
     live()
