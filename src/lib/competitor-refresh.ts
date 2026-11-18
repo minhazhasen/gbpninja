@@ -35,7 +35,7 @@ export async function refreshCompetitors({ locationId, force = false, max = 200 
     const locations = locationId ? [locationId] : (await provider.listLocations()).map((l) => l.id);
     const now = Date.now();
     const queue = (
-      await Promise.all(locations.map(async (id) => (await provider.listCompetitors(id)).filter((c) => c.source === "added" && c.mapsUrl && (force || due(c.checkedAt, now))).map((c) => ({ locationId: id, c }))))
+      await Promise.all(locations.map(async (id) => (await provider.listCompetitors(id)).filter((c) => c.source === "added" && c.mapsUrl && (force || due(c.checkedAt, now) || (!c.details && !c.checkError))).map((c) => ({ locationId: id, c }))))
     )
       .flat()
       .sort((a, b) => (a.c.checkedAt ?? "").localeCompare(b.c.checkedAt ?? ""))
@@ -58,7 +58,7 @@ export async function refreshCompetitors({ locationId, force = false, max = 200 
       }
       failuresInARow = 0;
       summary.updated++;
-      await provider.recordCompetitorCheck(id, c.id, { rating: place.rating, reviewCount: place.reviewCount });
+      await provider.recordCompetitorCheck(id, c.id, { rating: place.rating, reviewCount: place.reviewCount, details: place.details });
     }
     return summary;
   } finally {

@@ -29,6 +29,8 @@ export function createGoogleProvider(accessToken: string): GbpProvider {
     addPhotos: notImplemented("addPhotos"),
     updatePhoto: notImplemented("updatePhoto"),
     deletePhoto: notImplemented("deletePhoto"),
+    addVideo: notImplemented("addVideo"),
+    reloadPhotos: notImplemented("reloadPhotos"),
     // Categories: mybusinessbusinessinformation categories.list / batchGet; services: location.serviceItems.
     // Website services need a crawl of websiteUri; market services need nearby competitors (Places API).
     getProfileSuggestions: notImplemented("getProfileSuggestions"),

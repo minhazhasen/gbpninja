@@ -1,6 +1,8 @@
 import { ProfileBoard } from "@/components/profile/profile-board";
 import { getProvider } from "@/lib/gbp";
 
+export const metadata = { title: "My profile" };
+
 export default async function ProfilePage() {
   const provider = await getProvider();
   const [me, locations] = await Promise.all([provider.getCurrentMember(), provider.listLocations()]);

@@ -431,6 +431,45 @@ export async function deletePhoto(locationId: string, photoId: string): Promise<
   }
 }
 
+// ---------------------------------------------------------------- Media Library: videos (in pieces) and reloading from Google
+/** One piece of a video upload (base64, in order). Live: refused on localhost up front, since Google needs a public link. */
+export async function uploadVideoChunk(uploadId: string, index: number, base64: string): Promise<ActionResult> {
+  try {
+    const { appendVideoChunk } = await import("@/lib/video-upload");
+    const { appIsPublic } = await import("@/lib/public-media");
+    if (index === 0 && process.env.GBP_DATA_SOURCE === "google" && !appIsPublic())
+      return { ok: false, error: "Google fetches videos from a public link, which this computer (localhost) can't give it. Upload videos on the live site." };
+    await appendVideoChunk(z.string().parse(uploadId), z.number().int().min(0).max(100).parse(index), z.string().max(6_000_000).parse(base64));
+    return { ok: true, id: uploadId };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** The last piece arrived: add the video to the profile (live: Google fetches it from its public link). */
+export async function finishVideo(locationId: string, uploadId: string, ext: string, category: string): Promise<ActionResult> {
+  try {
+    const { finishVideoUpload } = await import("@/lib/video-upload");
+    const url = await finishVideoUpload(z.string().parse(uploadId), z.enum(["mp4", "mov"]).parse(ext));
+    const v = await (await getProvider()).addVideo(z.string().min(1).parse(locationId), { url, category: photoCategory.parse(category) });
+    revalidatePath("/", "layout");
+    return { ok: true, id: v.id };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+/** Media Library: read the profile's photos and videos from Google again (after changes made on Google directly). */
+export async function reloadMedia(locationId: string): Promise<ActionResult> {
+  try {
+    await (await getProvider()).reloadPhotos(z.string().min(1).parse(locationId));
+    revalidatePath("/", "layout");
+    return { ok: true, id: locationId };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
 // ---------------------------------------------------------------- Google Search Console (Settings → Data sources)
 /** Demo simulates the Google sign-in; live mode needs the Google OAuth app (plus the webmasters.readonly scope). */
 export async function connectSearchConsole(): Promise<ActionResult & { redirect?: string }> {
@@ -1036,7 +1075,6 @@ export async function trackOffer(offerId: string, event: "view" | "click"): Prom
 /** The workspace closed the offer card (✕): hidden for the whole workspace for the offer's snooze days. */
 export async function dismissOffer(offerId: string): Promise<void> {
   if (typeof offerId !== "string" || !offerId) return;
-  // TODO: the signed-in member's workspace once multi-workspace sign-in lands.
   closeOffer(await currentWorkspaceId(), offerId.slice(0, 200));
   revalidatePath("/dashboard");
   revalidatePath("/admin", "layout");
@@ -1047,6 +1085,8 @@ export async function bookOffer(offerId: string, locationId: string, input: { na
   try {
     const offer = (await listOffers()).find((o) => o.id === z.string().min(1).parse(offerId) && o.active);
     if (!offer) return { ok: false, error: "This offer has ended" };
+    // Offers sent to chosen workspaces can only be booked from those workspaces.
+    if (offer.workspaceIds?.length && !offer.workspaceIds.includes(await currentWorkspaceId())) return { ok: false, error: "This offer has ended" };
     const b = z
       .object({
         name: z.string().trim().min(1, "Add your name").max(100),
@@ -1088,7 +1128,6 @@ export async function bookOffer(offerId: string, locationId: string, input: { na
 export async function requestMeetingCancel(leadId: string, reason = ""): Promise<ActionResult> {
   try {
     const lead = await getLead(z.string().min(1).parse(leadId));
-    // TODO: check the lead belongs to the signed-in member's workspace once multi-workspace sign-in lands.
     if (!lead || lead.workspaceId !== (await currentWorkspaceId())) return { ok: false, error: "Meeting not found" };
     if (lead.status !== "booked") return { ok: false, error: "This meeting can't be cancelled any more" };
     const why = z.string().trim().max(500).parse(reason);
@@ -1176,6 +1215,23 @@ const competitorSchema = z.object({
   mapsUrl: z.string().trim().max(2000).nullable(),
   cid: z.string().trim().max(40).nullable(),
   distanceKm: z.number().min(0).max(40_000).nullable(),
+  // Read from the Maps listing by readMapsLink (Compare view): display-only, size-limited.
+  details: z
+    .object({
+      description: z.string().max(2000).nullable(),
+      phone: z.string().max(60).nullable(),
+      websiteUri: z.string().max(2000).nullable(),
+      bookingUrl: z.string().max(2000).nullable(),
+      hours: z.array(z.object({ day: z.string().max(20), text: z.string().max(120) })).max(14),
+      attributes: z.array(z.object({ group: z.string().max(80), items: z.array(z.string().max(120)).max(60) })).max(30),
+      starCounts: z.record(z.string(), z.number().int().min(0)).nullable(),
+      services: z.array(z.string().max(80)).max(60),
+      latestPost: z.object({ text: z.string().max(600), date: z.string().max(10).nullable() }).nullable(),
+      latestReview: z.string().max(10).nullable(),
+      claimed: z.boolean(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export async function addCompetitor(locationId: string, input: z.input<typeof competitorSchema>): Promise<ActionResult> {

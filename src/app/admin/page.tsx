@@ -9,6 +9,8 @@ import { setupChecklist } from "@/lib/platform/setup";
 import { isUpcomingMeeting } from "@/lib/platform/types";
 import { fmt } from "@/lib/utils";
 
+export const metadata = { title: { absolute: "Overview · Admin · GBPNinja" } };
+
 type Todo = { key: string; icon: React.ElementType; tone: string; title: string; action: React.ReactNode };
 
 export default async function AdminOverviewPage() {
@@ -18,7 +20,7 @@ export default async function AdminOverviewPage() {
   const myDue = tasks.filter((t) => !t.parentId && t.stage !== "done" && t.assigneeId === me?.id && t.dueDate && t.dueDate <= today).length;
   const newLeads = leads.filter((l) => l.status === "booked").length;
   const moveRequests = leads.filter((l) => (l.changeRequest || l.cancelRequest) && l.status === "booked").length;
-  const missing = setupChecklist().filter((s) => !s.ok).length;
+  const missing = (await setupChecklist()).filter((s) => !s.ok && !s.optional).length;
 
   const users = workspaces.reduce((n, w) => n + w.members.filter((m) => m.status === "active").length, 0);
   const profiles = workspaces.reduce((n, w) => n + w.profiles.length, 0);

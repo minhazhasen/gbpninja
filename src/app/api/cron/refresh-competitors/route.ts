@@ -3,6 +3,7 @@
 import { NextResponse } from "next/server";
 import { refreshCompetitors } from "@/lib/competitor-refresh";
 import { forEachWorkspace } from "@/lib/gbp/tenancy";
+import { recordJobRun } from "@/lib/job-runs";
 
 export const dynamic = "force-dynamic";
 // Checks run one at a time with pauses: give the run time to finish.
@@ -19,9 +20,16 @@ export async function GET(req: Request) {
   if (!authorized(req)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   // No one is signed in here: check every workspace's competitors, each inside its own workspace.
   const results: Record<string, Awaited<ReturnType<typeof refreshCompetitors>>> = {};
-  await forEachWorkspace(async (t) => {
-    results[t.id] = await refreshCompetitors();
-  });
+  try {
+    await forEachWorkspace(async (t) => {
+      results[t.id] = await refreshCompetitors();
+    });
+  } catch (e) {
+    recordJobRun("cron:refresh-competitors", false, e instanceof Error ? e.message : "Failed");
+    throw e;
+  }
+  const checked = Object.values(results).reduce((s, r) => s + (r.checked ?? 0), 0);
+  recordJobRun("cron:refresh-competitors", true, `${checked} competitor${checked === 1 ? "" : "s"} checked`);
   return NextResponse.json(results);
 }
 

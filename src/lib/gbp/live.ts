@@ -17,7 +17,7 @@ import { gbpErrorMessage } from "@/lib/google/business";
 import { GoogleApiError, disconnectGoogle, googleAccount, googleFetch } from "@/lib/google/oauth";
 import type { KeywordMonth } from "@/lib/keywords";
 import { channelMedia, emptyDraft, postStatusFromResults, type Channel, type CtaType, type Post } from "@/lib/posts";
-import { publicMediaUrl } from "@/lib/public-media";
+import { appIsPublic, publicMediaUrl } from "@/lib/public-media";
 import { mockProvider, publishLinkedin, publishMeta, syncPhotoStats, workspace } from "./mock";
 import { resolveTenant, saveTenant } from "./tenancy";
 import { currentTenant, runInTenant } from "./tenant-context";
@@ -64,6 +64,26 @@ interface GoogleCache {
 const cache = () => ((workspace as unknown as { google?: GoogleCache }).google ??= {});
 const fresh = (at: string | undefined, minutes: number) => !!at && Date.now() - new Date(at).getTime() < minutes * 60_000;
 const now = () => new Date().toISOString();
+
+/**
+ * Stale-while-revalidate: when Google data is saved but older than its cache time, the page uses the saved copy now and this
+ * re-reads it from Google in the background (one run per workspace + key at a time). The workspace is saved when it finishes.
+ * Only the very first read of something (nothing saved yet) makes a page wait for Google.
+ */
+function inBackground(key: string, run: () => Promise<unknown>) {
+  const t = currentTenant();
+  const k = `${t?.id ?? "-"}|${key}`;
+  if (bgRuns.has(k)) return;
+  bgRuns.add(k);
+  void run()
+    .catch(() => {})
+    .finally(() => {
+      bgRuns.delete(k);
+      if (t) saveTenant(t);
+    });
+}
+const gBg = globalThis as unknown as { __gbpnLiveBg?: Set<string> };
+const bgRuns = (gBg.__gbpnLiveBg ??= new Set<string>());
 
 /** Run a Google call; turn API errors into the plain-words message (quota 0, API disabled…). */
 async function g<T>(url: string, init?: RequestInit): Promise<T> {
@@ -209,6 +229,23 @@ interface GReview {
 }
 
 // ---------------------------------------------------------------- refresh
+/** Profiles + their attributes and photos. Google refused (e.g. access removed): keep the last copy and say why on the page. */
+async function syncLocations(force = false) {
+  try {
+    await refreshLocations(force);
+    for (const l of workspace.locations) delete (cache().issues ??= {})[`${l.id}|profile`];
+  } catch (e) {
+    if (!workspace.locations.length) throw e;
+    const issues = (cache().issues ??= {});
+    for (const l of workspace.locations) issues[`${l.id}|profile`] = e instanceof Error ? e.message : String(e);
+    return;
+  }
+  // Each profile's attributes and photos at the same time, not one after the other.
+  await Promise.all(
+    workspace.locations.flatMap((l) => [guard(l.id, "attributes", () => refreshAttributes(l), undefined), guard(l.id, "photos", () => refreshPhotos(l.id), undefined)]),
+  );
+}
+
 /** Re-read the picked locations from Google (in place, so mock.ts keeps its references). */
 async function refreshLocations(force = false) {
   const c = cache();
@@ -217,7 +254,10 @@ async function refreshLocations(force = false) {
     workspace.locations.splice(0, workspace.locations.length);
     return;
   }
-  if (!force && fresh(c.locationsAt, 15) && targets.every((t) => workspace.locations.some((l) => l.id === t.id))) return;
+  if (!force && c.locationsAt && targets.every((t) => workspace.locations.some((l) => l.id === t.id))) {
+    if (!fresh(c.locationsAt, 15)) inBackground("locations", () => syncLocations(true));
+    return;
+  }
   const next: Location[] = [];
   for (const t of targets) {
     const gl = await g<GLocation>(`${BI}/${t.id}?readMask=${READ_MASK}`);
@@ -236,7 +276,10 @@ async function refreshLocations(force = false) {
 async function refreshReviews(locationId: string, force = false) {
   const c = cache();
   c.reviewsAt ??= {};
-  if (!force && fresh(c.reviewsAt[locationId], 10) && workspace.reviews.has(locationId)) return;
+  if (!force && c.reviewsAt[locationId] && workspace.reviews.has(locationId)) {
+    if (!fresh(c.reviewsAt[locationId], 10)) inBackground(`reviews|${locationId}`, () => guard(locationId, "reviews", () => refreshReviews(locationId, true), undefined));
+    return;
+  }
   const accountId = accountOf(locationId);
   if (!accountId) return;
   const prev = new Map((workspace.reviews.get(locationId) ?? []).map((r) => [r.id, r]));
@@ -363,7 +406,10 @@ async function attributeDefs(loc: Location): Promise<AttributeDef[]> {
 async function refreshAttributes(loc: Location, force = false) {
   const c = cache();
   c.attributesAt ??= {};
-  if (!force && fresh(c.attributesAt[loc.id], 30)) return;
+  if (!force && c.attributesAt[loc.id]) {
+    if (!fresh(c.attributesAt[loc.id], 30)) inBackground(`attributes|${loc.id}`, () => guard(loc.id, "attributes", () => refreshAttributes(loc, true), undefined));
+    return;
+  }
   const defs = await attributeDefs(loc);
   const r = await g<{ attributes?: GAttr[] }>(`${BI}/${loc.id}/attributes`);
   const values: Record<string, AttributeValue> = {};
@@ -463,12 +509,15 @@ const GOOGLE_CATEGORY: Record<PhotoCategory, string> = {
 };
 
 const toPhoto = (m: GMedia, fromCustomer: boolean): Photo | null => {
-  const url = m.googleUrl ?? m.thumbnailUrl;
-  if (m.mediaFormat === "VIDEO" || !url) return null;
+  const video = m.mediaFormat === "VIDEO";
+  // Videos: googleUrl plays the video, thumbnailUrl is its still (Google may not have one while it processes a new upload).
+  const url = video ? (m.thumbnailUrl ?? "") : (m.googleUrl ?? m.thumbnailUrl);
+  if (!video && !url) return null;
   return {
+    ...(video ? { type: "video" as const, videoUrl: m.googleUrl ?? null } : {}),
     id: m.name.split("/").pop() ?? m.name,
     googleName: m.name,
-    url,
+    url: url ?? "",
     // Customer photos have no category of ours; Google files them separately.
     category: fromCustomer ? "additional" : (MEDIA_CATEGORY[m.locationAssociation?.category ?? ""] ?? "additional"),
     width: m.dimensions?.widthPixels,
@@ -479,11 +528,27 @@ const toPhoto = (m: GMedia, fromCustomer: boolean): Photo | null => {
   };
 };
 
+/** Create a photo or video on Google from a public link (Google fetches it), then read the profile's media again. */
+async function createMedia(locationId: string, format: "PHOTO" | "VIDEO", category: PhotoCategory, sourceUrl: string) {
+  const accountId = accountOf(locationId);
+  if (!accountId) throw new Error("This profile isn't connected to Google");
+  const created = await g<GMedia>(`${V4}/${accountId}/${locationId}/media`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mediaFormat: format, locationAssociation: { category: GOOGLE_CATEGORY[category] }, sourceUrl }),
+  });
+  await refreshPhotos(locationId, true);
+  return created;
+}
+
 /** The owner's photos and customers' photos from Google; photos uploaded here but not on Google yet (data: URLs) are kept. */
 async function refreshPhotos(locationId: string, force = false) {
   const c = cache();
   c.photosAt ??= {};
-  if (!force && fresh(c.photosAt[locationId], 30)) return;
+  if (!force && c.photosAt[locationId]) {
+    if (!fresh(c.photosAt[locationId], 30)) inBackground(`photos|${locationId}`, () => guard(locationId, "photos", () => refreshPhotos(locationId, true), undefined));
+    return;
+  }
   const accountId = accountOf(locationId);
   const loc = workspace.locations.find((l) => l.id === locationId);
   if (!accountId || !loc) return;
@@ -535,7 +600,10 @@ const CTAS = new Set(["BOOK", "ORDER", "SHOP", "LEARN_MORE", "SIGN_UP", "CALL"])
 async function importGooglePosts(locationId: string, force = false) {
   const c = cache();
   c.postsAt ??= {};
-  if (!force && fresh(c.postsAt[locationId], 30)) return;
+  if (!force && c.postsAt[locationId]) {
+    if (!fresh(c.postsAt[locationId], 30)) inBackground(`posts|${locationId}`, () => guard(locationId, "posts", () => importGooglePosts(locationId, true), undefined));
+    return;
+  }
   const accountId = accountOf(locationId);
   if (!accountId) return;
   // Posts published from the app carry Google's ids; don't import those again.
@@ -812,19 +880,7 @@ const live: Partial<GbpProvider> = {
   async listLocations() {
     if (!(await googleAccount("gbp"))) return [];
     // Google refused (e.g. access removed): keep the last copy of the profiles and say why on the page instead of failing it.
-    try {
-      await refreshLocations();
-      for (const l of workspace.locations) delete (cache().issues ??= {})[`${l.id}|profile`];
-    } catch (e) {
-      if (!workspace.locations.length) throw e;
-      const issues = (cache().issues ??= {});
-      for (const l of workspace.locations) issues[`${l.id}|profile`] = e instanceof Error ? e.message : String(e);
-      return workspace.locations;
-    }
-    for (const l of workspace.locations) {
-      await guard(l.id, "attributes", () => refreshAttributes(l), undefined);
-      await guard(l.id, "photos", () => refreshPhotos(l.id), undefined);
-    }
+    await syncLocations();
     return workspace.locations;
   },
   async getLocation(id) {
@@ -960,6 +1016,27 @@ const live: Partial<GbpProvider> = {
     Object.assign(loc, rest);
     return loc;
   },
+  async addPhotos(id, photos) {
+    // Each photo goes to Google from a public link (saved by the app and served at APP_URL/api/media/…).
+    const names: string[] = [];
+    for (const p of photos) names.push((await createMedia(id, "PHOTO", p.category, await publicMediaUrl(p.url, "Google"))).name);
+    const list = workspace.locations.find((l) => l.id === id)?.photos ?? [];
+    return list.filter((p) => p.googleName && names.includes(p.googleName));
+  },
+  async addVideo(id, video) {
+    if (!appIsPublic()) throw new Error("Google fetches videos from a public link, which this computer (localhost) can't give it. Upload videos on the live site.");
+    const created = await createMedia(id, "VIDEO", video.category, video.url);
+    const loc = workspace.locations.find((l) => l.id === id);
+    // Google may still be processing it: show it now, the next read replaces it with Google's copy.
+    const mine = loc?.photos?.find((p) => p.googleName === created.name);
+    if (mine) return mine;
+    const pending: Photo = { id: created.name.split("/").pop() ?? created.name, googleName: created.name, url: created.thumbnailUrl ?? "", type: "video", videoUrl: created.googleUrl ?? video.url, category: video.category, createdAt: created.createTime ?? now() };
+    if (loc) loc.photos = [...(loc.photos ?? []), pending];
+    return pending;
+  },
+  async reloadPhotos(id) {
+    await refreshPhotos(id, true);
+  },
   async updatePhoto(id, photoId, patch) {
     const photo = workspace.locations.find((l) => l.id === id)?.photos?.find((p) => p.id === photoId);
     if (photo?.fromCustomer) throw new Error("This photo was added by a customer. Only Google can change it.");
@@ -978,7 +1055,7 @@ const live: Partial<GbpProvider> = {
     return mockProvider.deletePhoto(id, photoId);
   },
   async listPosts() {
-    if (await googleAccount("gbp")) for (const l of workspace.locations) await guard(l.id, "posts", () => importGooglePosts(l.id), undefined);
+    if (await googleAccount("gbp")) await Promise.all(workspace.locations.map((l) => guard(l.id, "posts", () => importGooglePosts(l.id), undefined)));
     return workspace.posts;
   },
   async listReviews(locationId) {
@@ -998,7 +1075,14 @@ const live: Partial<GbpProvider> = {
   async getMetrics(locationId, days) {
     const c = (cache().metrics ??= {});
     const hit = c[locationId];
-    if (hit && hit.days >= days && fresh(hit.at, 360)) return hit.points.slice(-days);
+    if (hit && hit.days >= days) {
+      if (!fresh(hit.at, 360))
+        inBackground(`metrics|${locationId}`, async () => {
+          const points = await guard(locationId, "insights", () => fetchMetrics(locationId, hit.days), null);
+          if (points) c[locationId] = { at: now(), days: hit.days, points };
+        });
+      return hit.points.slice(-days);
+    }
     const points = await guard(locationId, "insights", () => fetchMetrics(locationId, Math.max(days, 28)), null);
     // Failed: zeros for the range (the page shows the issue), not cached so the next visit retries.
     if (!points) return emptyMetrics(days);
@@ -1007,7 +1091,15 @@ const live: Partial<GbpProvider> = {
   },
   async getSearchKeywords(locationId) {
     const c = (cache().keywords ??= {});
-    if (fresh(c[locationId]?.at, 720)) return c[locationId].months;
+    const kw = c[locationId];
+    if (kw) {
+      if (!fresh(kw.at, 720))
+        inBackground(`keywords|${locationId}`, async () => {
+          const months = await guard(locationId, "keywords", () => fetchKeywords(locationId), null);
+          if (months) c[locationId] = { at: now(), months };
+        });
+      return kw.months;
+    }
     const months = await guard(locationId, "keywords", () => fetchKeywords(locationId), null);
     if (!months) return [];
     c[locationId] = { at: now(), months };

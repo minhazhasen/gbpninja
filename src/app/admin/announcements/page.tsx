@@ -2,6 +2,8 @@ import { AnnouncementsBoard } from "@/components/admin/announcements-board";
 import { PageHeader } from "@/components/ui";
 import { listAnnouncements } from "@/lib/platform/store";
 
+export const metadata = { title: "Announcements" };
+
 export default async function AdminAnnouncementsPage() {
   return (
     <div className="space-y-5 pb-8">

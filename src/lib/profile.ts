@@ -262,3 +262,50 @@ export function suggestDescription(l: Pick<Location, "title" | "primaryCategory"
   ];
   return parts.join(" ").slice(0, DESCRIPTION_MAX);
 }
+
+// ---- Special hours: carry last year's holiday dates forward
+
+const ymdOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** The nth (1-based, or -1 = last) given weekday of a month. */
+function nthWeekday(year: number, month: number, weekday: number, nth: number) {
+  if (nth === -1) {
+    const d = new Date(year, month + 1, 0);
+    d.setDate(d.getDate() - ((d.getDay() - weekday + 7) % 7));
+    return d;
+  }
+  const d = new Date(year, month, 1);
+  d.setDate(1 + ((weekday - d.getDay() + 7) % 7) + (nth - 1) * 7);
+  return d;
+}
+/** US holidays that fall on a weekday rule rather than a fixed date: [month (0-based), weekday, nth, days after]. */
+const FLOATING: [number, number, number, number][] = [
+  [10, 4, 4, 0], // Thanksgiving: 4th Thursday of November
+  [10, 4, 4, 1], // Day after Thanksgiving
+  [4, 1, -1, 0], // Memorial Day: last Monday of May
+  [8, 1, 1, 0], // Labor Day: 1st Monday of September
+  [0, 1, 3, 0], // Martin Luther King Jr. Day: 3rd Monday of January
+  [1, 1, 3, 0], // Presidents' Day: 3rd Monday of February
+];
+
+/**
+ * The same day in the next year that's still ahead: Thanksgiving-style holidays keep their weekday rule (4th Thursday…),
+ * everything else keeps its month and day. `date` and `today` are yyyy-MM-dd.
+ */
+export function nextHolidayDate(date: string, today: string) {
+  const [y, m, d] = date.split("-").map(Number);
+  const src = new Date(y, m - 1, d);
+  const rule = FLOATING.find(([month, weekday, nth, after]) => {
+    const base = nthWeekday(y, month, weekday, nth);
+    base.setDate(base.getDate() + after);
+    return ymdOf(base) === date;
+  });
+  for (let year = y + 1; year <= y + 3; year++) {
+    let next: Date;
+    if (rule) {
+      next = nthWeekday(year, rule[0], rule[1], rule[2]);
+      next.setDate(next.getDate() + rule[3]);
+    } else next = new Date(year, src.getMonth(), Math.min(src.getDate(), new Date(year, src.getMonth() + 1, 0).getDate()));
+    if (ymdOf(next) >= today) return ymdOf(next);
+  }
+  return null;
+}

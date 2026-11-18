@@ -24,11 +24,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Scheduled posts that are due go out now (the cron route is the main trigger; this covers gaps while people use the app).
   after(publishDueSoon);
   const provider = await getProvider();
-  const posts = await provider.listPosts();
-  const [locations, tasks] = await Promise.all([provider.listLocations(), provider.listTasks()]);
+  // Profiles first (posts are read per profile), then everything else at the same time.
+  const locations = await provider.listLocations();
+  const [posts, tasks, reviewsBy] = await Promise.all([provider.listPosts(), provider.listTasks(), Promise.all(locations.map((l) => provider.listReviews(l.id)))]);
   const shell: ShellLocation[] = await Promise.all(
-    locations.map(async (l) => {
-      const reviews = await provider.listReviews(l.id);
+    locations.map(async (l, i) => {
+      const reviews = reviewsBy[i];
       return {
         id: l.id,
         title: l.title,

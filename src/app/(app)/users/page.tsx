@@ -1,6 +1,8 @@
 import { UsersBoard } from "@/components/users/users-board";
 import { getProvider } from "@/lib/gbp";
 
+export const metadata = { title: "Users" };
+
 export default async function UsersPage() {
   const provider = await getProvider();
   const [members, me, locations] = await Promise.all([provider.listMembers(), provider.getCurrentMember(), provider.listLocations()]);

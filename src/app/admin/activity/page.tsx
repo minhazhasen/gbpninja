@@ -2,6 +2,8 @@ import { format, parseISO } from "date-fns";
 import { Card, EmptyState, PageHeader } from "@/components/ui";
 import { listLog } from "@/lib/platform/store";
 
+export const metadata = { title: "Activity" };
+
 export default async function AdminActivityPage() {
   const log = await listLog();
   return (

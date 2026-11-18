@@ -8,6 +8,8 @@ import { CHANNELS } from "@/lib/posts";
 import { isTemplateKind } from "@/lib/templates";
 import { withLocation } from "@/lib/utils";
 
+export const metadata = { title: "Settings" };
+
 const TABS = [
   { key: "accounts", label: "Accounts", intro: "Connect your accounts and configure the workspace" },
   { key: "email", label: "Email", intro: "Send review requests from your own Gmail address" },

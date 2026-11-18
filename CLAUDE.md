@@ -76,7 +76,7 @@ a content calendar for posts, and a profile audit with in-app fixes.
     extra hours (`moreHours`, keeps `typeId`), services keep `serviceTypeId` + `currencyCode`. Saves go to Google: attributes PATCH with
     `attributeMask`, address (`storefrontAddress`), holiday hours (`specialHours`), services (`serviceItems`), extra hours; the profile is
     re-read after every PATCH. Products aren't in Google's API: `notInApi: ["products"]` → audit skips product checks, Products tab says
-    so. Service area / hide address edits are refused with "change it on Google" (Google needs place ids). Not real yet: uploading new photos to Google, attributes/services push, Search Console, Facebook/
+    so. Service area / hide address edits are refused with "change it on Google" (Google needs place ids). Not real yet: attributes/services push, Search Console, Facebook/
     Instagram/LinkedIn/X publishing, Google returns quota 0 until the Cloud project's
     GBP API access is approved (`gbpErrorMessage`).
   - `google.ts` — older stub provider kept for its endpoint notes; not used.
@@ -108,6 +108,14 @@ a content calendar for posts, and a profile audit with in-app fixes.
   editor tabs: recommended / avoid / example for the open field) — examples come from this profile's own data (services, hours, links, Google's unanswered
   attributes); with nothing set, a neutral format hint — never another business or a fixed city, `shared.tsx`. Services are `ServiceItem[]` (category, price type,
   price, description); `Location.products` is optional `Product[]`.
+- Media Library (`src/app/(app)/media`, sidebar under Work): every photo and video on the profile — StatStrip, `PhotosPanel` with
+  `source="media"` (videos, Videos filter, no logo/cover slots, player in the viewer), "Reload from Google" (`reloadMedia` → provider
+  `reloadPhotos`). `Photo.type = "video"` + `videoUrl` (url = thumbnail, may be empty); videos don't count in `photoCount`. Rules in
+  `src/lib/media-rules.ts` (photos JPG/PNG 10 KB–5 MB ≥250 px; videos MP4/MOV ≤30 s, ≤75 MB, ≥720p). Video upload: `src/lib/video-client.ts`
+  sends 4 MB base64 pieces → `uploadVideoChunk` (`src/lib/video-upload.ts`, temp file in `<data dir>/media/tmp`) → `finishVideo` moves it
+  to public media and calls provider `addVideo`. Live: photos (audit and Media Library) and videos are created on Google with v4 `media`
+  `sourceUrl` = the app's public link (`publicMediaUrl` / `/api/media/<name>`, which serves byte ranges), so uploads need the live site
+  (refused on localhost); then `refreshPhotos(force)`. Demo keeps them in the app.
 - Settings has tabs via `?tab=` (page owns PageHeader + PillTabs): `accounts` (connections-board, Data sources), `email`
   (`settings/email-settings.tsx`: Gmail sender — provider `getEmailSender/connectGmail/updateEmailSender/disconnectGmail/sendEmail`,
   gmail.send scope, daily limit), `templates` (`settings/templates-board.tsx`: request email / text / review-reply templates,
@@ -169,12 +177,27 @@ a content calendar for posts, and a profile audit with in-app fixes.
   after 3 failures in a row) → provider `recordCompetitorCheck` (rating, reviews, `checkedAt`, `checkError`, `history` one point/day via
   `addPoint`). Runs from `/api/cron/refresh-competitors` (Bearer `CRON_SECRET`; call daily) and via `after()` when the Competitors page
   is opened; "Check now" (`checkCompetitorsNow`) forces it. Table shows review change /7d and rating change /30d (`changeOver`).
-  "Review growth" chart above the table (`review-growth-chart.tsx`, recharts): one line per business from `history` (yours = `reviewHistory()`
-  from your review dates; demo found competitors get generated history in mock), Total (default) / Growth (reviews gained in range), the Performance page's `DateRangePicker` (default last 30 days), and a
-  Competitors multi-select (default you + top 4 by reviews, max 8 lines; colours `--viz-1..8`, assigned to the lines on screen).
+  "Review growth" chart above the table (`review-growth-chart.tsx`, recharts bar charts) from `history` (yours = `reviewHistory()` from your
+  review dates; demo found competitors get generated history in mock): Total (default) = one vertical bar per business, its review count at
+  the range end (names under the bars, 2 lines, shortened); Growth = new reviews per day (≤14 days) / week (≤120) / month, grouped bars per
+  business, over the last 30 days (no date picker). No legend (names in the tooltip). A Competitors multi-select
+  (default you + top 4 by reviews, max 8; colours `--viz-1..8`, assigned to the businesses on screen).
   Row ⋯: Edit details (`updateCompetitor`, added ones), Open in Google Maps, Remove (added → `deleteCompetitor` + undo re-add;
   found → `setCompetitorHidden`, "removed competitors" list with Restore). `Competitor.source` found | added, `hidden`, `mapsUrl`, `cid`,
   `distanceKm` null when unknown. Per location; mock keeps edits in `state.competitorEdits`. Mock found list = `COMPETITOR_SEEDS`.
+  Compare view (ported from the NWDS GBP project): panel header List / Compare (`Segmented`), `competitor-compare.tsx` = one column
+  per business, one row per thing Google shows (score 0–100 with Leader crown, rating, reviews + last review, new reviews 30 days, distance,
+  owner-verified, categories (missing ones highlighted), description, hours, amenity groups, latest Google post, contact).
+  No filters: every competitor (search applies) and every row always show.
+  Competitors' data = `Competitor.details` (`CompetitorDetails`): `maps-scrape.ts` `placeDetails()` reads it from the Maps place array
+  ([203] hours, [100] amenities, [175] stars/reviews, job_type_id services from reviews, [122] latest post, [57] claimed, [154] description);
+  search-only links are re-read by cid for the full place. Saved on add (dialog → `details` in the action schema) and by the daily check
+  (`recordCompetitorCheck`; competitors without details are checked even when fresh). Yours = `profileDetails()` in `src/lib/competitors.ts`
+  from your own profile, reviews and posts. No average-rank box (GBPNinja has no map/keyword rank tracking).
+  No Services row: competitors' own services exist only in Google Search's Places panel, which servers can't read (Google blocks
+  them) — a bookmarklet and a Chrome extension were tried and dropped as too much for users. Don't add reviewer-mentioned services
+  instead. `?view=compare` opens Compare.
+  Compare shows a "Read now" notice (= Check now) while some listings haven't been read.
 - Tasks (`src/app/(app)/tasks`, `src/components/tasks/`, `src/lib/tasks.ts`) — workspace tasks with subtasks (`Task.parentId`), stage
   (todo / in_progress / in_review / done), priority, assignee (member id), due date, location (null = all). Views via `?view=`: list
   (`task-list.tsx`), Kanban (`task-kanban.tsx`, @dnd-kit/sortable, `order` floats via `orderBetween`), calendar (`task-calendar.tsx`, drag to
@@ -188,10 +211,14 @@ a content calendar for posts, and a profile audit with in-app fixes.
   removed) + the team added in Admin → Team (`/admin/team`, `team-board.tsx`; roles `admin` = everything incl. the team, `staff` = the rest;
   store `team`, `listTeam(envAdmins)`; they sign in to the app with that email). Local demo runs = a demo admin, production builds never;
   non-team get a 404. Linked from the account menu for admins. Sidebar: Overview; Customers (Workspaces, Offers, Meetings, Issues); Team
-  (Tasks, Team); Platform. Badges = upcoming meetings, new issues, my open tasks. Workspaces (+ `/admin/workspaces/[id]`: suspend/reactivate,
-  members, notes, delete, Add task; activity + performance via `workspaceInsights(id)` in store.ts — runs that workspace's provider inside
-  `runInTenant`, last 30 days, counts only (views/actions vs previous 30, rating, reply rate, posts, requests, tasks, activity feed,
-  connections; `workspace-insights.tsx`), plus its offers (`workspace-offers.tsx`: Send offer), meetings, issues, team tasks).
+  (Tasks, Team); Platform. Badges = upcoming meetings, new issues, my open tasks. Workspaces (+ `/admin/workspaces/[id]`, tabs via `?tab=`:
+  Overview (stats vs previous 30 days, `workspace-trend.tsx` daily bars views/actions/reviews, "Needs attention" list, customer actions
+  by type + search/maps split, review health (stars, unanswered, 1–3★ unanswered, median reply time), content & work, posts per network,
+  feature usage, recent activity), Profiles (audit score, reviews +new, rating, unanswered, views, actions, photos, last Google post),
+  Activity (`workspace-activity.tsx`: day-grouped timeline with kind filters + admin history), People (members + connected accounts),
+  Support (offers `workspace-offers.tsx`, meetings, issues, team tasks, internal notes). Header (`workspace-detail.tsx` `WorkspaceHeader`):
+  suspend/reactivate, delete, Add task, summary incl. average profile score. Data: `workspaceInsights(id)` in store.ts — runs that
+  workspace's provider inside `runInTenant`, last 30 days incl. today (local dates), counts only, no review texts).
   Offer targeting: `Offer.workspaceIds` ([] = every workspace); `sendOffer(ws, offer)` adds the workspace, clears its close and records
   `offerSent` (skips the new-account wait; `offerFor` prefers the last-sent offer); offer form "Who sees it" (every / chosen workspaces),
   `/admin/offers?new=1&for=<ws>` opens a new offer for one workspace. Meetings page `/admin/meetings` (`meetings-board.tsx`, `?filter=`
@@ -201,8 +228,12 @@ a content calendar for posts, and a profile audit with in-app fixes.
   `?status=`, `?issue=`, assignee, answer to reporter `replyToIssue`, private notes, Add task). Admin Tasks `/admin/tasks` reuse the
   workspace `TasksBoard` (`api` = platform actions, `platform` options: `locationId` = the workspace, type filter issue/meeting/workspace);
   store `tasks`; `createLinkedTask(kind, id)` makes a task with `source: { type: "platform", kind, refId, label, href }` (one open per item).
-  Filter constants used by server pages live in `platform/types.ts` (not in "use client" files). Integrations (env checklist,
-  `src/lib/platform/setup.ts` — the developer setup lives here, not in Settings), Announcements (banner in the app shell, one live at a time,
+  Filter constants used by server pages live in `platform/types.ts` (not in "use client" files). Integrations (`src/lib/platform/setup.ts`
+  `setupChecklist()` — async: every env setting the app reads (SESSION_SECRET, Firebase, Google client + redirect, data source, APP_URL,
+  DATABASE_URL, admins; Meta / LinkedIn optional) and the scheduled jobs: last cron call per job from `src/lib/job-runs.ts`
+  (`recordJobRun` in the cron routes and the backup job, AppState "jobRuns"; publish-posts must have run in 30 min, competitors in 26 h)
+  and the newest backup file (`latestBackup`). A banner says whether it's the live site or a local dev server; locally, live-only items
+  (cron secret, public links, jobs, backups) read "Not needed locally". The developer setup lives here, not in Settings), Announcements (banner in the app shell, one live at a time,
   `components/announcement-banner.tsx`), Offers (service promos like managed Local SEO: title, info, price, button → every workspace's Dashboard
   `components/offer-card.tsx`, or only to chosen workspaces; no plans or billing — the app is free; the button opens a booking form (date + weekday
   time slots `MEETING_SLOTS`, no double-booking via `takenSlots`) → `bookOffer` → a meeting lead booked/met/won/lost; views/clicks counted once per

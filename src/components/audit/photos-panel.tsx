@@ -1,40 +1,38 @@
 "use client";
 
 // Photos tab: logo, cover and the categorised gallery. Upload (button or drag and drop), recategorise, view and delete.
-// Images are resized client-side and stored as data: URLs until real file storage / the Google Media API is wired up.
+// Images are resized client-side, then put on Google (live; the demo keeps them in the app). The Media Library uses the same
+// panel with videos too (source "media": no logo / cover slots, video upload in pieces, a player in the viewer).
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ChevronLeft, ChevronRight, Eye, ImagePlus, Loader2, Trash2, Upload } from "lucide-react";
+import { ChevronLeft, ChevronRight, Eye, Film, ImagePlus, Loader2, Play, Trash2, Upload } from "lucide-react";
 import { buttonClass } from "@/components/ui";
 import { Modal, Segmented, SelectBox, useConfirm } from "@/components/ui-client";
 import { deletePhoto, updatePhoto, uploadPhotos } from "@/app/(app)/actions";
+import { uploadVideo } from "@/lib/video-client";
 import type { Location, NewPhoto, Photo, PhotoCategory } from "@/lib/gbp/types";
-import { PHOTO_CATEGORIES, PHOTO_MAX_BYTES, PHOTO_MIN_PX, PHOTO_RECOMMENDED_PX, photoCategoryLabel } from "@/lib/profile";
+import { PHOTO_CATEGORIES, photoCategoryLabel } from "@/lib/profile";
+import { PHOTO_ACCEPT, PHOTO_RECOMMENDED_PX, PHOTO_RULES, VIDEO_ACCEPT, VIDEO_RULES, canvasToUpload, checkPhoto, checkVideo } from "@/lib/media-rules";
 import { cn } from "@/lib/utils";
 import { SubHead } from "./shared";
 
-const ACCEPT = "image/jpeg,image/png,image/webp";
+const ACCEPT = PHOTO_ACCEPT;
 const MAX_EDGE = 1600;
 
 /** Read, validate and resize one file. Returns an error message instead of throwing. */
 type Prepared = NewPhoto & { width: number; height: number };
 async function prepare(file: File, category: PhotoCategory): Promise<Prepared | string> {
-  if (!ACCEPT.split(",").includes(file.type)) return `${file.name}: use a JPG or PNG`;
-  if (file.size > PHOTO_MAX_BYTES) return `${file.name}: larger than 5 MB`;
-  if (file.size < 10 * 1024) return `${file.name}: smaller than 10 KB`;
+  const problem = await checkPhoto(file);
+  if (problem) return problem;
   const bmp = await createImageBitmap(file);
-  if (bmp.width < PHOTO_MIN_PX || bmp.height < PHOTO_MIN_PX) {
-    bmp.close();
-    return `${file.name}: at least ${PHOTO_MIN_PX} × ${PHOTO_MIN_PX} px needed`;
-  }
   const scale = Math.min(1, MAX_EDGE / Math.max(bmp.width, bmp.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(bmp.width * scale);
   canvas.height = Math.round(bmp.height * scale);
   canvas.getContext("2d")?.drawImage(bmp, 0, 0, canvas.width, canvas.height);
   bmp.close();
-  return { url: canvas.toDataURL(file.type === "image/png" ? "image/png" : "image/jpeg", 0.86), category, width: canvas.width, height: canvas.height };
+  return { url: canvasToUpload(canvas, file.type).url, category, width: canvas.width, height: canvas.height };
 }
 
 const sizeHint = (p: Photo) => (p.width && p.height ? `${p.width} × ${p.height}` : "");
@@ -42,17 +40,25 @@ const sizeHint = (p: Photo) => (p.width && p.height ? `${p.width} × ${p.height}
 const views = (n: number) => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
 const dateLabel = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-export function PhotosPanel({ location }: { location: Location }) {
+export function PhotosPanel({ location, source = "audit" }: { location: Location; source?: "audit" | "media" }) {
+  const media = source === "media";
   const router = useRouter();
   const { confirm, dialog } = useConfirm();
   const photos = location.photos ?? [];
   const logo = photos.find((p) => p.category === "logo");
   const cover = photos.find((p) => p.category === "cover");
-  const gallery = photos.filter((p) => p.category !== "logo" && p.category !== "cover").sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  // The Media Library has no logo / cover slots: those two show in its grid (changed on the Profile Audit).
+  const gallery = photos.filter((p) => media || (p.category !== "logo" && p.category !== "cover")).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const slotted = (p: Photo) => p.category === "logo" || p.category === "cover";
+  const isVideo = (p: Photo) => p.type === "video";
+  const videoCount = gallery.filter(isVideo).length;
+  const photoCount = gallery.filter((p) => !isVideo(p) && !slotted(p)).length;
   const counts = new Map<PhotoCategory, number>();
   for (const p of gallery) counts.set(p.category, (counts.get(p.category) ?? 0) + 1);
 
-  const [filter, setFilter] = useState<"all" | PhotoCategory>("all");
+  const [filter, setFilter] = useState<"all" | "videos" | PhotoCategory>("all");
+  const [progress, setProgress] = useState<number | null>(null);
+  const videoInput = useRef<HTMLInputElement>(null);
   const [uploadAs, setUploadAs] = useState<PhotoCategory>("exterior");
   const [busy, setBusy] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -63,7 +69,8 @@ export function PhotosPanel({ location }: { location: Location }) {
   const galleryInput = useRef<HTMLInputElement>(null);
   const logoInput = useRef<HTMLInputElement>(null);
   const coverInput = useRef<HTMLInputElement>(null);
-  const filtered = filter === "all" ? gallery : gallery.filter((p) => p.category === filter);
+  const filtered = filter === "all" ? gallery : filter === "videos" ? gallery.filter(isVideo) : gallery.filter((p) => p.category === filter);
+  const uploadCategory: PhotoCategory = filter === "all" || filter === "videos" ? uploadAs : filter;
   const shown = hasViews && sort === "views" ? [...filtered].sort((a, b) => (b.views ?? -1) - (a.views ?? -1)) : filtered;
   const viewing = viewIndex != null ? shown[viewIndex] : null;
 
@@ -97,7 +104,7 @@ export function PhotosPanel({ location }: { location: Location }) {
 
   const remove = async (p: Photo) => {
     const ok = await confirm({
-      title: `Delete this ${p.category === "logo" ? "logo" : p.category === "cover" ? "cover photo" : "photo"}?`,
+      title: `Delete this ${p.category === "logo" ? "logo" : p.category === "cover" ? "cover photo" : isVideo(p) ? "video" : "photo"}?`,
       description: "It will be removed from your Business Profile on Google. This can't be undone.",
       confirmLabel: "Delete",
       tone: "danger",
@@ -107,9 +114,37 @@ export function PhotosPanel({ location }: { location: Location }) {
     const res = await deletePhoto(location.id, p.id);
     setBusy(null);
     if (!res.ok) return toast.error(res.error);
-    toast.success("Photo deleted");
+    toast.success(isVideo(p) ? "Video deleted" : "Photo deleted");
     setViewIndex(null);
     router.refresh();
+  };
+
+  // Videos go up one at a time, in pieces, with progress; Google may take a few minutes to show a new video.
+  const uploadVideos = async (files: FileList | File[] | null, category: PhotoCategory) => {
+    const list = Array.from(files ?? []).slice(0, 5);
+    if (!list.length) return;
+    setBusy("video");
+    let n = 0;
+    for (const f of list) {
+      const bad = await checkVideo(f);
+      if (bad) {
+        toast.error(bad);
+        continue;
+      }
+      setProgress(0);
+      const res = await uploadVideo(location.id, f, category, setProgress);
+      if (!res.ok) {
+        toast.error(`${f.name}: ${res.error}`);
+        continue;
+      }
+      n++;
+    }
+    setProgress(null);
+    setBusy(null);
+    if (n) {
+      toast.success(`${n} video${n === 1 ? "" : "s"} sent to Google`, { description: "Google checks new videos first; they can take a few minutes to show up." });
+      router.refresh();
+    }
   };
 
   const slot = (kind: "logo" | "cover", photo: Photo | undefined, input: React.RefObject<HTMLInputElement | null>) => (
@@ -160,18 +195,22 @@ export function PhotosPanel({ location }: { location: Location }) {
     </div>
   );
 
-  const filterOptions = [
+  const filterOptions: { value: "all" | "videos" | PhotoCategory; label: string }[] = [
     { value: "all" as const, label: `All · ${gallery.length}` },
+    ...(videoCount ? [{ value: "videos" as const, label: `Videos · ${videoCount}` }] : []),
     ...PHOTO_CATEGORIES.filter((c) => counts.get(c.id)).map((c) => ({ value: c.id, label: `${c.label} · ${counts.get(c.id)}` })),
+    ...(["logo", "cover"] as const).filter((c) => counts.get(c)).map((c) => ({ value: c, label: `${c === "logo" ? "Logo" : "Cover"} · ${counts.get(c)}` })),
   ];
 
   return (
     <div className="space-y-6">
       {dialog}
-      <div className="flex flex-col gap-4 sm:flex-row">
-        {slot("logo", logo, logoInput)}
-        {slot("cover", cover, coverInput)}
-      </div>
+      {!media && (
+        <div className="flex flex-col gap-4 sm:flex-row">
+          {slot("logo", logo, logoInput)}
+          {slot("cover", cover, coverInput)}
+        </div>
+      )}
 
       <div
         onDragOver={(e) => {
@@ -184,11 +223,15 @@ export function PhotosPanel({ location }: { location: Location }) {
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);
-          void upload(e.dataTransfer.files, filter === "all" ? uploadAs : filter, "gallery");
+          const files = Array.from(e.dataTransfer.files);
+          const vids = files.filter((f) => f.type.startsWith("video/"));
+          if (vids.length && media) void uploadVideos(vids, uploadCategory);
+          const pics = files.filter((f) => !f.type.startsWith("video/"));
+          if (pics.length) void upload(pics, uploadCategory, "gallery");
         }}
         className={cn("rounded-xl transition-shadow", dragging && "ring-2 ring-primary ring-offset-4 ring-offset-card")}
       >
-        <SubHead action={<span className={cn("text-xs tabular-nums", gallery.length >= 10 ? "text-success" : "text-muted-foreground")}>{gallery.length} of 10+ recommended</span>}>Photos</SubHead>
+        <SubHead action={<span className={cn("text-xs tabular-nums", photoCount >= 10 ? "text-success" : "text-muted-foreground")}>{photoCount} of 10+ recommended</span>}>{media ? "Photos and videos" : "Photos"}</SubHead>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             {gallery.length > 0 ? <Segmented size="sm" value={filter} onChange={setFilter} label="Photo category" options={filterOptions} /> : <span />}
@@ -205,20 +248,40 @@ export function PhotosPanel({ location }: { location: Location }) {
               />
             )}
           </div>
-          <div className="flex items-center gap-2">
-            {filter === "all" && (
+          {/* Phones: the category picker takes its own line and the buttons share the next one. */}
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:flex-nowrap">
+            {(filter === "all" || filter === "videos") && (
               <SelectBox
                 value={uploadAs}
                 onChange={(v) => setUploadAs(v as PhotoCategory)}
                 label="Upload as"
-                className="w-52"
+                className="w-full sm:w-52"
                 options={PHOTO_CATEGORIES.map((c) => ({ value: c.id, label: `Upload as ${c.label}` }))}
               />
             )}
             <button type="button" className={buttonClass("default", "sm", "h-9")} disabled={!!busy} onClick={() => galleryInput.current?.click()}>
               {busy === "gallery" ? <Loader2 className="animate-spin" /> : <ImagePlus />} Upload photos
             </button>
+            {media && (
+              <button type="button" className={buttonClass("outline", "sm", "h-9")} disabled={!!busy} onClick={() => videoInput.current?.click()}>
+                {busy === "video" ? <Loader2 className="animate-spin" /> : <Film />}
+                {busy === "video" && progress != null ? `Uploading ${Math.round(progress * 100)}%` : "Upload video"}
+              </button>
+            )}
           </div>
+          {media && (
+            <input
+              ref={videoInput}
+              type="file"
+              accept={VIDEO_ACCEPT}
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                void uploadVideos(e.target.files, uploadCategory);
+                e.target.value = "";
+              }}
+            />
+          )}
           <input
             ref={galleryInput}
             type="file"
@@ -226,7 +289,7 @@ export function PhotosPanel({ location }: { location: Location }) {
             multiple
             className="hidden"
             onChange={(e) => {
-              void upload(e.target.files, filter === "all" ? uploadAs : filter, "gallery");
+              void upload(e.target.files, uploadCategory, "gallery");
               e.target.value = "";
             }}
           />
@@ -237,8 +300,21 @@ export function PhotosPanel({ location }: { location: Location }) {
             {shown.map((p, i) => (
               <li key={p.id}>
                 <button type="button" onClick={() => setViewIndex(i)} className="group relative block aspect-square w-full overflow-hidden rounded-lg bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img referrerPolicy="no-referrer" src={p.url} alt={`${photoCategoryLabel(p.category)} photo`} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]" />
+                  {p.url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img referrerPolicy="no-referrer" src={p.url} alt={`${photoCategoryLabel(p.category)} ${isVideo(p) ? "video" : "photo"}`} loading="lazy" className="h-full w-full object-cover transition-transform group-hover:scale-[1.03]" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-muted-foreground">
+                      <Film className="h-6 w-6" />
+                    </span>
+                  )}
+                  {isVideo(p) && (
+                    <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                      <span className="flex h-9 w-9 items-center justify-center rounded-full bg-black/55 text-white">
+                        <Play className="ml-0.5 h-4 w-4 fill-current" />
+                      </span>
+                    </span>
+                  )}
                   <span className="absolute bottom-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium text-white">{p.fromCustomer ? "Customer" : photoCategoryLabel(p.category)}</span>
                   {p.views != null && (
                     <span className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded bg-black/55 px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-white" title={`${p.views.toLocaleString("en-US")} views on Google`}>
@@ -269,19 +345,23 @@ export function PhotosPanel({ location }: { location: Location }) {
             className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-10 text-center transition-colors hover:border-primary hover:bg-accent/50"
           >
             {busy === "gallery" ? <Loader2 className="h-7 w-7 animate-spin text-primary" /> : <ImagePlus className="h-7 w-7 text-primary" />}
-            <span className="text-sm font-semibold">{filter === "all" ? "Add your first photos" : `No ${photoCategoryLabel(filter).toLowerCase()} photos yet`}</span>
-            <span className="max-w-sm text-xs text-muted-foreground">Drag photos here or click to upload. JPG or PNG, 10 KB–5 MB, at least {PHOTO_MIN_PX} px ({PHOTO_RECOMMENDED_PX} px recommended).</span>
+            <span className="text-sm font-semibold">{filter === "all" ? (media ? "Add your first photos or videos" : "Add your first photos") : filter === "videos" ? "No videos yet" : `No ${photoCategoryLabel(filter).toLowerCase()} photos yet`}</span>
+            <span className="max-w-sm text-xs text-muted-foreground">Drag photos{media ? " or videos" : ""} here or click to upload. Photos: {PHOTO_RULES}.{media ? ` Videos: ${VIDEO_RULES}.` : ""}</span>
           </button>
         )}
         <p className="mt-2 text-xs text-muted-foreground">Tip: drag photos onto this area to upload. Exterior, interior and team photos help customers recognise you.</p>
       </div>
 
-      <Modal open={!!viewing} onClose={() => setViewIndex(null)} title={viewing ? photoCategoryLabel(viewing.category) : ""} className="sm:max-w-4xl">
+      <Modal open={!!viewing} onClose={() => setViewIndex(null)} title={viewing ? `${photoCategoryLabel(viewing.category)}${isVideo(viewing) ? " video" : ""}` : ""} className="sm:max-w-4xl">
         {viewing && (
           <div className="grid min-h-0 flex-1 overflow-y-auto md:grid-cols-[minmax(0,1fr)_260px]">
             <div className="relative flex items-center justify-center bg-foreground/95 md:min-h-[460px]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img referrerPolicy="no-referrer" src={viewing.url} alt={`${photoCategoryLabel(viewing.category)} photo`} className="max-h-[65vh] w-auto max-w-full object-contain" />
+              {isVideo(viewing) && viewing.videoUrl ? (
+                <video key={viewing.id} src={viewing.videoUrl} poster={viewing.url || undefined} controls playsInline className="max-h-[65vh] w-auto max-w-full" />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img referrerPolicy="no-referrer" src={viewing.url} alt={`${photoCategoryLabel(viewing.category)} photo`} className="max-h-[65vh] w-auto max-w-full object-contain" />
+              )}
               {viewIndex! > 0 && (
                 <button type="button" onClick={() => setViewIndex(viewIndex! - 1)} className={buttonClass("secondary", "icon", "absolute left-3 top-1/2 h-9 w-9 -translate-y-1/2 rounded-full")} aria-label="Previous photo">
                   <ChevronLeft />
@@ -294,7 +374,11 @@ export function PhotosPanel({ location }: { location: Location }) {
               )}
             </div>
             <div className="space-y-4 p-5">
-              {viewing.fromCustomer ? (
+              {media && slotted(viewing) ? (
+                <p className="rounded-lg bg-muted px-3 py-2.5 text-sm text-muted-foreground">
+                  This is your {viewing.category === "logo" ? "logo" : "cover photo"} on Google. Replace it on the Profile Audit page.
+                </p>
+              ) : viewing.fromCustomer ? (
                 <p className="rounded-lg bg-muted px-3 py-2.5 text-sm text-muted-foreground">
                   Added by a customer on Google. It counts toward your photos, but only Google can change or remove it. Report it on Google Maps if it shouldn&apos;t be there.
                 </p>
@@ -305,7 +389,7 @@ export function PhotosPanel({ location }: { location: Location }) {
                   value={viewing.category}
                   onChange={(v) => void recategorise(viewing, v as PhotoCategory)}
                   label="Photo category"
-                  options={[...PHOTO_CATEGORIES.map((c) => ({ value: c.id, label: c.label })), { value: "cover", label: "Use as cover photo" }, { value: "logo", label: "Use as logo" }]}
+                  options={[...PHOTO_CATEGORIES.map((c) => ({ value: c.id, label: c.label })), ...(isVideo(viewing) || media ? [] : [{ value: "cover", label: "Use as cover photo" }, { value: "logo", label: "Use as logo" }])]}
                 />
               </div>
               )}
@@ -327,16 +411,16 @@ export function PhotosPanel({ location }: { location: Location }) {
                   </div>
                 )}
                 <div className="flex justify-between gap-3">
-                  <dt className="text-muted-foreground">Photo</dt>
+                  <dt className="text-muted-foreground">{isVideo(viewing) ? "Item" : "Photo"}</dt>
                   <dd className="tabular-nums">
                     {viewIndex! + 1} of {shown.length}
                   </dd>
                 </div>
               </dl>
-              {viewing.width != null && viewing.width < PHOTO_RECOMMENDED_PX && <p className="rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">Smaller than {PHOTO_RECOMMENDED_PX} px. It may look blurry on large screens.</p>}
-              {!viewing.fromCustomer && (
+              {!isVideo(viewing) && viewing.width != null && viewing.width < PHOTO_RECOMMENDED_PX && <p className="rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">Smaller than {PHOTO_RECOMMENDED_PX} px. It may look blurry on large screens.</p>}
+              {!viewing.fromCustomer && !(media && slotted(viewing)) && (
                 <button type="button" className={buttonClass("outline", "sm", "w-full text-destructive hover:bg-destructive/10 hover:text-destructive")} disabled={!!busy} onClick={() => remove(viewing)}>
-                  {busy === `del:${viewing.id}` ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete photo
+                  {busy === `del:${viewing.id}` ? <Loader2 className="animate-spin" /> : <Trash2 />} Delete {isVideo(viewing) ? "video" : "photo"}
                 </button>
               )}
             </div>

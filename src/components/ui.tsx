@@ -21,7 +21,7 @@ export function PageHeader({ title, actions, children }: { title: React.ReactNod
   );
 }
 
-export function PanelHeader({ title, meta, action }: { title: string; meta?: React.ReactNode; action?: React.ReactNode }) {
+export function PanelHeader({ title, meta, extra, action }: { title: string; meta?: React.ReactNode; extra?: React.ReactNode; action?: React.ReactNode }) {
   return (
     // Wraps when narrow: the actions drop below the title instead of squeezing it (and its badges) underneath them.
     <div className="flex min-h-14 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b px-5 py-3 lg:px-6">
@@ -29,6 +29,8 @@ export function PanelHeader({ title, meta, action }: { title: string; meta?: Rea
         <span className="truncate">{title}</span>
         {meta != null && <span className="max-w-full text-sm font-normal tabular-nums text-muted-foreground">{meta}</span>}
       </h2>
+      {/* Controls that belong with the title (filters), kept out of the heading itself. */}
+      {extra != null && <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">{extra}</div>}
       {action != null && <div className="ml-auto flex min-w-0 max-w-full items-center">{action}</div>}
     </div>
   );

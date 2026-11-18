@@ -3,6 +3,8 @@ import { getProvider } from "@/lib/gbp";
 import { resolveLocation } from "@/lib/location";
 import { TASK_VIEWS, type TaskView } from "@/lib/tasks";
 
+export const metadata = { title: "Tasks" };
+
 type Params = { location?: string; view?: string; task?: string };
 
 export default async function TasksPage({ searchParams }: { searchParams: Promise<Params> }) {

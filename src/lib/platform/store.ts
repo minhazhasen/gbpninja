@@ -5,6 +5,8 @@ import { getProvider } from "@/lib/gbp";
 import { loadDoc, saveDoc } from "@/lib/gbp/persist";
 import type { Task, TaskInput, TaskPatch } from "@/lib/gbp/types";
 import { CHANNEL_LABEL, type Channel } from "@/lib/posts";
+import { auditLocation } from "@/lib/audit";
+import { ymd } from "@/lib/date-ranges";
 import { listTenants, resolveTenant } from "@/lib/gbp/tenancy";
 import { currentTenant, runInTenant } from "@/lib/gbp/tenant-context";
 import {
@@ -254,6 +256,13 @@ state.offerSent ??= {};
 state.issues ??= live ? [] : seedIssues();
 state.team ??= live ? [] : [{ id: "team_alex", name: "Alex Morgan", email: "alex@gbpninja.example", role: "staff", createdAt: daysAgo(30), addedBy: null, lastActiveAt: daysAgo(1) }];
 state.tasks ??= live ? [] : seedTasks();
+// Live data: the demo's made-up sample workspaces never belong here (a database first used with sample data can still hold them).
+const SAMPLE_IDS = new Set(["ws_brightsmile", "ws_lakeside", "ws_urbanfit", "ws_harbor", "ws_northside"]);
+if (live && state.workspaces.some((w) => SAMPLE_IDS.has(w.id))) {
+  state.workspaces = state.workspaces.filter((w) => !SAMPLE_IDS.has(w.id));
+  state.leads = (state.leads ?? []).filter((l) => !SAMPLE_IDS.has(l.workspaceId));
+  state.issues = (state.issues ?? []).filter((i) => !SAMPLE_IDS.has(i.workspaceId));
+}
 // No plans or trials any more: older in-memory workspaces on "trial" become active.
 for (const w of state.workspaces as { status: string }[]) if (w.status === "trial") w.status = "active";
 // Older in-memory shapes (before counters / bookings / timing).
@@ -686,8 +695,26 @@ export function deletePlatformTask(id: string) {
 
 // ---------------------------------------------------------------- workspace insights
 
+export type ActivityKind = "post" | "review" | "reply" | "task" | "request" | "member" | "connection" | "competitor";
+
 export interface WorkspaceInsights {
-  profiles: { id: string; title: string; reviews: number; rating: number | null; unreplied: number; views: number; actions: number }[];
+  profiles: {
+    id: string;
+    title: string;
+    address: string;
+    reviews: number;
+    rating: number | null;
+    newReviews: number;
+    unreplied: number;
+    views: number;
+    actions: number;
+    /** Profile audit score 0–100 (same checks as the app's Profile audit). */
+    score: number;
+    photos: number;
+    verified: boolean;
+    /** Last post published to this profile on Google (any time). */
+    lastPost: string | null;
+  }[];
   totals: {
     reviews: number;
     rating: number | null;
@@ -699,12 +726,37 @@ export interface WorkspaceInsights {
     actionsBefore: number;
     published: number;
     scheduled: number;
+    failed: number;
     openTasks: number;
     doneTasks: number;
     requests: number;
+    competitors: number;
+    /** Average audit score over the profiles. */
+    score: number | null;
   };
-  connections: { channel: string; status: string; account?: string | null }[];
-  activity: { at: string; text: string; kind: "post" | "review" | "reply" | "task" | "request" | "member" | "connection" }[];
+  /** One point per day, last 30 days, all profiles together. */
+  daily: { date: string; views: number; actions: number; reviews: number }[];
+  /** Customer actions by type, last 30 days vs the 30 before. */
+  actionMix: { label: string; now: number; before: number }[];
+  /** Views by where they came from, last 30 days. */
+  viewMix: { search: number; maps: number };
+  reviewHealth: {
+    /** Reviews per star, "1"…"5" (all time). */
+    stars: Record<number, number>;
+    unreplied: number;
+    /** Unreplied 1–3★ reviews. */
+    unrepliedNegative: number;
+    /** Median hours from review to reply, replies in the last 30 days. */
+    replyHours: number | null;
+  };
+  /** Posts published in the last 30 days per network. */
+  postsByChannel: { channel: string; count: number }[];
+  /** Which parts of the app the workspace has used (ever / last 30 days). */
+  usage: { feature: string; used: boolean; detail: string }[];
+  /** Things the platform team may want to follow up on, most important first. */
+  attention: { level: "high" | "medium"; text: string }[];
+  connections: { channel: string; status: string; account?: string | null; connectedAt?: string | null }[];
+  activity: { at: string; text: string; kind: ActivityKind }[];
   /** Data that couldn't be read (e.g. Google errors), shown under the panel. */
   errors: string[];
 }
@@ -717,67 +769,269 @@ const withTimeout = <T>(p: Promise<T>, ms = 8000) => Promise.race([p, new Promis
  * Counts and totals only: no review texts or customer details. Sample workspaces without data return null.
  */
 export async function workspaceInsights(id: string): Promise<WorkspaceInsights | null> {
+  const hit = insightsCache.get(id);
+  if (hit?.data !== undefined) {
+    // Fresh: use it. Older: use it now and refresh in the background (stale-while-revalidate), so the page never waits twice.
+    if (Date.now() - hit.at > INSIGHTS_FRESH_MS && !hit.pending) void loadInsights(id);
+    return hit.data;
+  }
+  return hit?.pending ?? loadInsights(id);
+}
+
+/** Last insights read for a workspace, without waiting (null = none yet). */
+export const cachedInsights = (id: string) => insightsCache.get(id)?.data ?? null;
+
+const INSIGHTS_FRESH_MS = 10 * 60_000;
+const gi = globalThis as unknown as { __gbpnInsights?: Map<string, { at: number; data?: WorkspaceInsights | null; pending?: Promise<WorkspaceInsights | null> }> };
+const insightsCache = (gi.__gbpnInsights ??= new Map());
+
+function loadInsights(id: string): Promise<WorkspaceInsights | null> {
   const tenant = listTenants().find((t) => t.id === id);
   const w = state.workspaces.find((x) => x.id === id);
-  if (!tenant && !w?.current) return null;
-  const run = () => collectInsights();
-  return tenant ? runInTenant({ id: tenant.id, state: tenant.state }, run) : run();
+  const entry = insightsCache.get(id) ?? { at: 0 };
+  const pending = (async () => {
+    try {
+      if (!tenant && !w?.current) return w && !live ? sampleInsights(w) : null;
+      const run = () => collectInsights();
+      const data = await (tenant ? runInTenant({ id: tenant.id, state: tenant.state }, run) : run());
+      insightsCache.set(id, { at: Date.now(), data });
+      return data;
+    } catch (e) {
+      insightsCache.set(id, { ...entry, pending: undefined });
+      throw e;
+    }
+  })();
+  insightsCache.set(id, { ...entry, pending });
+  return pending;
+}
+
+/** Demo only: made-up but steady numbers for the sample workspaces, so the admin pages show what a real one looks like. */
+function sampleInsights(w: StoredWorkspace): WorkspaceInsights {
+  let seed = [...w.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) >>> 0) % 10000) / 10000;
+  const int = (a: number, b: number) => Math.round(a + rnd() * (b - a));
+  const day = (n: number) => new Date(Date.now() - n * DAY).toISOString();
+  const profiles = w.profiles.map((p) => {
+    const reviews = int(20, 400);
+    return {
+      id: p.id,
+      title: p.title,
+      address: p.address,
+      reviews,
+      rating: Math.round((3.6 + rnd() * 1.3) * 10) / 10,
+      newReviews: int(0, 15),
+      unreplied: int(0, Math.min(25, reviews)),
+      views: int(400, 6000),
+      actions: int(30, 500),
+      score: int(35, 95),
+      photos: int(0, 80),
+      verified: rnd() > 0.15,
+      lastPost: rnd() > 0.2 ? day(int(0, 45)) : null,
+    };
+  });
+  const sum = (k: "reviews" | "newReviews" | "unreplied" | "views" | "actions") => profiles.reduce((n, p) => n + p[k], 0);
+  const views = sum("views"),
+    actions = sum("actions"),
+    reviews = sum("reviews");
+  const daily = Array.from({ length: RANGE_DAYS }, (_, i) => ({ date: ymd(new Date(Date.now() - (RANGE_DAYS - 1 - i) * DAY)), views: Math.round(views / RANGE_DAYS * (0.6 + rnd() * 0.8)), actions: Math.round(actions / RANGE_DAYS * (0.5 + rnd())), reviews: int(0, 2) }));
+  const unrepliedNegative = int(0, 4);
+  return {
+    profiles,
+    totals: {
+      reviews,
+      rating: profiles.length ? Math.round((profiles.reduce((n, p) => n + (p.rating ?? 0) * p.reviews, 0) / Math.max(1, reviews)) * 10) / 10 : null,
+      newReviews: sum("newReviews"),
+      replyRate: reviews ? Math.round((1 - sum("unreplied") / reviews) * 100) : null,
+      views,
+      viewsBefore: Math.round(views * (0.8 + rnd() * 0.4)),
+      actions,
+      actionsBefore: Math.round(actions * (0.8 + rnd() * 0.4)),
+      published: int(0, 12),
+      scheduled: int(0, 5),
+      failed: 0,
+      openTasks: int(0, 8),
+      doneTasks: int(0, 10),
+      requests: int(0, 30),
+      competitors: int(0, 10),
+      score: profiles.length ? Math.round(profiles.reduce((n, p) => n + p.score, 0) / profiles.length) : null,
+    },
+    daily,
+    actionMix: [
+      { label: "Calls", now: Math.round(actions * 0.35), before: Math.round(actions * 0.32) },
+      { label: "Website clicks", now: Math.round(actions * 0.4), before: Math.round(actions * 0.42) },
+      { label: "Directions", now: Math.round(actions * 0.25), before: Math.round(actions * 0.27) },
+    ],
+    viewMix: { search: Math.round(views * 0.6), maps: Math.round(views * 0.4) },
+    reviewHealth: { stars: { 5: Math.round(reviews * 0.7), 4: Math.round(reviews * 0.15), 3: Math.round(reviews * 0.06), 2: Math.round(reviews * 0.03), 1: Math.round(reviews * 0.06) }, unreplied: sum("unreplied"), unrepliedNegative, replyHours: int(2, 72) },
+    postsByChannel: [{ channel: "Google", count: int(1, 8) }],
+    usage: [
+      { feature: "Google profiles", used: profiles.length > 0, detail: `${profiles.length} connected` },
+      { feature: "Posts", used: true, detail: "Sample data" },
+      { feature: "Review replies", used: true, detail: "Sample data" },
+      { feature: "Review requests", used: rnd() > 0.4, detail: "Sample data" },
+      { feature: "Competitors", used: rnd() > 0.5, detail: "Sample data" },
+    ],
+    attention: unrepliedNegative ? [{ level: "high", text: `${unrepliedNegative} unanswered reviews of 3★ or less` }] : [],
+    connections: [{ channel: "Google", status: "connected", account: w.ownerEmail, connectedAt: w.createdAt }],
+    activity: [],
+    errors: ["Sample workspace: these numbers are made up for the demo"],
+  };
 }
 
 async function collectInsights(): Promise<WorkspaceInsights> {
   const provider = await getProvider();
   const errors: string[] = [];
   const safe = async <T>(label: string, p: () => Promise<T>, fallback: T) => {
+    const t0 = Date.now();
     try {
       return await withTimeout(p());
     } catch (e) {
       errors.push(`${label}: ${e instanceof Error ? e.message : "couldn't load"}`);
       return fallback;
+    } finally {
+      if (process.env.NODE_ENV !== "production" && Date.now() - t0 > 500) console.log(`[insights] ${label} took ${Date.now() - t0} ms`);
     }
   };
   const since = Date.now() - RANGE_DAYS * DAY;
   const recent = (iso?: string | null) => !!iso && new Date(iso).getTime() >= since;
-  const [locations, posts, tasks, members, connections, requests] = await Promise.all([
+  // The last 30 days including today (the chart's days and the totals use the same ones); "before" = the 30 days before.
+  const days = Array.from({ length: RANGE_DAYS }, (_, i) => ymd(new Date(Date.now() - (RANGE_DAYS - 1 - i) * DAY)));
+  const cut = days[0];
+  const [locations, posts, tasks, members, connections, requests, templates] = await Promise.all([
     safe("Profiles", () => provider.listLocations(), []),
     safe("Posts", () => provider.listPosts(), []),
     safe("Tasks", () => provider.listTasks(), []),
     safe("Members", () => provider.listMembers(), []),
     safe("Connections", () => provider.listConnections(), []),
     safe("Review requests", () => provider.listReviewRequests(), []),
+    safe("Templates", () => provider.listTemplates(), []),
   ]);
+  const syncIssues = provider.getSyncIssues ? await safe("Sync", () => provider.getSyncIssues!(locations.map((l) => l.id)), []) : [];
   const perProfile = await Promise.all(
     locations.map(async (l) => {
-      const [reviews, metrics] = await Promise.all([safe(`Reviews (${l.title})`, () => provider.listReviews(l.id), []), safe(`Performance (${l.title})`, () => provider.getMetrics(l.id, RANGE_DAYS * 2), [])]);
-      const cut = new Date(since).toISOString().slice(0, 10);
-      const sum = (pts: typeof metrics) => pts.reduce((a, p) => ({ views: a.views + p.impressions, actions: a.actions + p.calls + p.websiteClicks + p.directions }), { views: 0, actions: 0 });
-      return { l, reviews, now: sum(metrics.filter((p) => p.date >= cut)), before: sum(metrics.filter((p) => p.date < cut)) };
+      const [reviews, metrics, competitors] = await Promise.all([
+        safe(`Reviews (${l.title})`, () => provider.listReviews(l.id), []),
+        safe(`Performance (${l.title})`, () => provider.getMetrics(l.id, RANGE_DAYS * 2), []),
+        safe(`Competitors (${l.title})`, () => provider.listCompetitors(l.id), []),
+      ]);
+      const sum = (pts: typeof metrics) =>
+        pts.reduce(
+          (a, p) => ({ views: a.views + p.impressions, actions: a.actions + p.calls + p.websiteClicks + p.directions, calls: a.calls + p.calls, website: a.website + p.websiteClicks, directions: a.directions + p.directions, search: a.search + p.searchImpressions, maps: a.maps + p.mapsImpressions }),
+          { views: 0, actions: 0, calls: 0, website: 0, directions: 0, search: 0, maps: 0 },
+        );
+      const visible = reviews.filter((r) => !r.hidden);
+      const mine = posts.filter((p) => !p.google.locations.length || p.google.locations.includes(l.id));
+      const lastPost =
+        mine
+          .filter((p) => p.status === "published" && p.published_at && (p.imported ? p.imported.channel === "google" : p.channels.includes("google")))
+          .map((p) => p.published_at!)
+          .sort()
+          .at(-1) ?? null;
+      let score = 0;
+      try {
+        score = auditLocation(l, visible, mine).score;
+      } catch {
+        score = 0;
+      }
+      return { l, reviews: visible, metrics, now: sum(metrics.filter((p) => p.date >= cut)), before: sum(metrics.filter((p) => p.date < cut)), competitors: competitors.filter((c) => c.source === "added" && !c.hidden), lastPost, score };
     }),
   );
 
-  const allReviews = perProfile.flatMap((p) => p.reviews.filter((r) => !r.hidden).map((r) => ({ ...r, profile: p.l.title })));
+  const allReviews = perProfile.flatMap((p) => p.reviews.map((r) => ({ ...r, profile: p.l.title })));
   const avg = (rs: { rating: number }[]) => (rs.length ? Math.round((rs.reduce((n, r) => n + r.rating, 0) / rs.length) * 10) / 10 : null);
   const parents = tasks.filter((t) => !t.parentId);
   const names = (cs: string[]) => cs.map((c) => CHANNEL_LABEL[c as Channel] ?? c).join(", ");
+  const own = posts.filter((p) => !p.imported);
+  const publishedRecent = own.filter((p) => p.status === "published" && recent(p.published_at));
+
   const activity: WorkspaceInsights["activity"] = [
-    ...posts.filter((p) => !p.imported && recent(p.created_at)).map((p) => ({ at: p.created_at, kind: "post" as const, text: `Created a post (${names(p.channels)})` })),
-    ...posts.filter((p) => !p.imported && p.status === "published" && recent(p.published_at)).map((p) => ({ at: p.published_at!, kind: "post" as const, text: `Published a post to ${names(p.channels)}` })),
+    ...own.filter((p) => recent(p.created_at)).map((p) => ({ at: p.created_at, kind: "post" as const, text: `Created a post (${names(p.channels)})` })),
+    ...publishedRecent.map((p) => ({ at: p.published_at!, kind: "post" as const, text: `Published a post to ${names(p.channels)}` })),
     ...allReviews.filter((r) => recent(r.createTime)).map((r) => ({ at: r.createTime, kind: "review" as const, text: `New ${r.rating}★ review on ${r.profile}` })),
     ...allReviews.filter((r) => recent(r.reply?.updateTime)).map((r) => ({ at: r.reply!.updateTime, kind: "reply" as const, text: `Replied to a ${r.rating}★ review on ${r.profile}` })),
+    ...parents.filter((t) => recent(t.createdAt)).map((t) => ({ at: t.createdAt, kind: "task" as const, text: `Added a task: ${t.title}` })),
     ...parents.filter((t) => t.stage === "done" && recent(t.completedAt)).map((t) => ({ at: t.completedAt!, kind: "task" as const, text: `Finished a task: ${t.title}` })),
     ...requests.filter((r) => recent(r.sentAt ?? r.createdAt)).map((r) => ({ at: r.sentAt ?? r.createdAt, kind: "request" as const, text: `Sent a review request (${r.method})` })),
     ...members.filter((m) => recent(m.joinedAt)).map((m) => ({ at: m.joinedAt!, kind: "member" as const, text: `${m.name || m.email} joined` })),
     ...connections.filter((c) => recent(c.connectedAt)).map((c) => ({ at: c.connectedAt!, kind: "connection" as const, text: `Connected ${names([c.channel])}` })),
+    ...perProfile.flatMap((p) => p.competitors.filter((c) => recent(c.updatedAt)).map((c) => ({ at: c.updatedAt!, kind: "competitor" as const, text: `Added competitor ${c.name} for ${p.l.title}` }))),
   ]
     .sort((a, b) => b.at.localeCompare(a.at))
-    .slice(0, 25);
+    .slice(0, 200);
 
-  const total = (k: "views" | "actions", when: "now" | "before") => perProfile.reduce((n, p) => n + p[when][k], 0);
+  // Daily trend: all profiles together.
+  const daily = days.map((date) => {
+    let views = 0,
+      actions = 0;
+    for (const p of perProfile)
+      for (const m of p.metrics)
+        if (m.date === date) {
+          views += m.impressions;
+          actions += m.calls + m.websiteClicks + m.directions;
+        }
+    return { date, views, actions, reviews: allReviews.filter((r) => ymd(new Date(r.createTime)) === date).length };
+  });
+
+  const total = (k: "views" | "actions" | "calls" | "website" | "directions" | "search" | "maps", when: "now" | "before") => perProfile.reduce((n, p) => n + p[when][k], 0);
   const replyable = allReviews.filter((r) => r.comment || r.reply);
+  const stars: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  for (const r of allReviews) stars[r.rating] = (stars[r.rating] ?? 0) + 1;
+  const replyTimes = allReviews
+    .filter((r) => r.reply && recent(r.reply.updateTime))
+    .map((r) => (new Date(r.reply!.updateTime).getTime() - new Date(r.createTime).getTime()) / 3600_000)
+    .filter((h) => h >= 0)
+    .sort((a, b) => a - b);
+  const unreplied = allReviews.filter((r) => !r.reply);
+  const unrepliedNegative = unreplied.filter((r) => r.rating <= 3).length;
+  const byChannel = new Map<string, number>();
+  for (const p of publishedRecent) for (const c of p.channels) byChannel.set(names([c]), (byChannel.get(names([c])) ?? 0) + 1);
+  const scores = perProfile.map((p) => p.score);
+  const competitorCount = perProfile.reduce((n, p) => n + p.competitors.length, 0);
+  const connected = connections.filter((c) => c.status === "connected");
+
+  const usage: WorkspaceInsights["usage"] = [
+    { feature: "Google profiles", used: locations.length > 0, detail: `${locations.length} connected` },
+    { feature: "Posts", used: own.length > 0, detail: `${publishedRecent.length} published · 30 days` },
+    { feature: "Review replies", used: allReviews.some((r) => r.reply), detail: `${allReviews.filter((r) => recent(r.reply?.updateTime)).length} · 30 days` },
+    { feature: "Review requests", used: requests.length > 0, detail: `${requests.length} sent` },
+    { feature: "Templates", used: templates.length > 0, detail: `${templates.length} saved` },
+    { feature: "Tasks", used: parents.length > 0, detail: `${parents.filter((t) => t.stage !== "done").length} open` },
+    { feature: "Competitors", used: competitorCount > 0, detail: `${competitorCount} tracked` },
+    { feature: "Social networks", used: connected.some((c) => c.channel !== "google"), detail: connected.filter((c) => c.channel !== "google").map((c) => names([c.channel])).join(", ") || "None" },
+    { feature: "Team", used: members.filter((m) => m.status === "active").length > 1, detail: `${members.filter((m) => m.status === "active").length} active · ${members.filter((m) => m.status === "invited").length} invited` },
+  ];
+
+  const attention: WorkspaceInsights["attention"] = [];
+  if (!locations.length) attention.push({ level: "high", text: "No Google profiles connected yet" });
+  if (syncIssues.length) attention.push({ level: "high", text: `${syncIssues.length} Google sync problem${syncIssues.length === 1 ? "" : "s"} (${[...new Set(syncIssues.map((x) => x.area))].join(", ")})` });
+  if (unrepliedNegative) attention.push({ level: "high", text: `${unrepliedNegative} unanswered review${unrepliedNegative === 1 ? "" : "s"} of 3★ or less` });
+  const quiet = perProfile.filter((p) => !p.lastPost || new Date(p.lastPost).getTime() < since);
+  if (locations.length && quiet.length) attention.push({ level: "medium", text: `${quiet.length} of ${locations.length} profile${locations.length === 1 ? "" : "s"} with no Google post in 30 days` });
+  const weak = perProfile.filter((p) => p.score < 60);
+  if (weak.length) attention.push({ level: "medium", text: `${weak.length} profile${weak.length === 1 ? "" : "s"} score under 60 in the audit` });
+  if (total("views", "before") && total("views", "now") < total("views", "before") * 0.8) attention.push({ level: "medium", text: `Profile views down ${Math.round((1 - total("views", "now") / total("views", "before")) * 100)}% vs the 30 days before` });
+  if (unreplied.length - unrepliedNegative > 10) attention.push({ level: "medium", text: `${unreplied.length} reviews waiting for a reply` });
+  const failed = own.filter((p) => p.status === "failed" || p.status === "partially_failed").length;
+  if (failed) attention.push({ level: "medium", text: `${failed} post${failed === 1 ? "" : "s"} failed to publish` });
+  const lastAct = activity.find((a) => a.kind !== "review")?.at;
+  if (locations.length && (!lastAct || Date.now() - new Date(lastAct).getTime() > 14 * DAY)) attention.push({ level: "medium", text: "No team activity in the last 14 days" });
+
   return {
-    profiles: perProfile.map((p) => {
-      const rs = p.reviews.filter((r) => !r.hidden);
-      return { id: p.l.id, title: p.l.title, reviews: rs.length, rating: avg(rs), unreplied: rs.filter((r) => !r.reply).length, views: p.now.views, actions: p.now.actions };
-    }),
+    profiles: perProfile.map((p) => ({
+      id: p.l.id,
+      title: p.l.title,
+      address: p.l.address,
+      reviews: p.reviews.length,
+      rating: avg(p.reviews),
+      newReviews: p.reviews.filter((r) => recent(r.createTime)).length,
+      unreplied: p.reviews.filter((r) => !r.reply).length,
+      views: p.now.views,
+      actions: p.now.actions,
+      score: p.score,
+      photos: p.l.photoCount ?? 0,
+      verified: !!p.l.verified,
+      lastPost: p.lastPost,
+    })),
     totals: {
       reviews: allReviews.length,
       rating: avg(allReviews),
@@ -787,13 +1041,27 @@ async function collectInsights(): Promise<WorkspaceInsights> {
       viewsBefore: total("views", "before"),
       actions: total("actions", "now"),
       actionsBefore: total("actions", "before"),
-      published: posts.filter((p) => !p.imported && p.status === "published" && recent(p.published_at)).length,
-      scheduled: posts.filter((p) => p.status === "scheduled").length,
+      published: publishedRecent.length,
+      scheduled: own.filter((p) => p.status === "scheduled").length,
+      failed: own.filter((p) => p.status === "failed" || p.status === "partially_failed").length,
       openTasks: parents.filter((t) => t.stage !== "done").length,
       doneTasks: parents.filter((t) => t.stage === "done" && recent(t.completedAt)).length,
       requests: requests.filter((r) => recent(r.sentAt ?? r.createdAt)).length,
+      competitors: competitorCount,
+      score: scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null,
     },
-    connections: connections.map((c) => ({ channel: names([c.channel]), status: c.status, account: c.account })),
+    daily,
+    actionMix: [
+      { label: "Calls", now: total("calls", "now"), before: total("calls", "before") },
+      { label: "Website clicks", now: total("website", "now"), before: total("website", "before") },
+      { label: "Directions", now: total("directions", "now"), before: total("directions", "before") },
+    ],
+    viewMix: { search: total("search", "now"), maps: total("maps", "now") },
+    reviewHealth: { stars, unreplied: unreplied.length, unrepliedNegative, replyHours: replyTimes.length ? Math.round(replyTimes[Math.floor(replyTimes.length / 2)]) : null },
+    postsByChannel: [...byChannel].map(([channel, count]) => ({ channel, count })).sort((a, b) => b.count - a.count),
+    usage,
+    attention: attention.sort((a, b) => (a.level === b.level ? 0 : a.level === "high" ? -1 : 1)),
+    connections: connections.map((c) => ({ channel: names([c.channel]), status: c.status, account: c.account, connectedAt: c.connectedAt ?? null })),
     activity,
     errors,
   };

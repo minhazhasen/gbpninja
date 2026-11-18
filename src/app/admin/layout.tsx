@@ -5,7 +5,7 @@ import { listIssues, listLeads, listPlatformTasks } from "@/lib/platform/store";
 import { isUpcomingMeeting } from "@/lib/platform/types";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Platform admin" };
+export const metadata = { title: { default: "Platform admin · GBPNinja", template: "%s · Admin · GBPNinja" } };
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const me = await platformMember();

@@ -253,7 +253,7 @@ export function ContentBoard({ posts: serverPosts, connected, locations, current
           )}
         </div>
 
-        <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
+        <DndContext id="content-board" sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragging(null)}>
           {view === "list" ? (
             <ListView rows={listRows} counts={counts} status={status} setStatus={setStatus} onOpen={open} />
           ) : view === "week" ? (

@@ -5,6 +5,8 @@ import { auditLocation } from "@/lib/audit";
 import { getProvider } from "@/lib/gbp";
 import { cn, withLocation } from "@/lib/utils";
 
+export const metadata = { title: "Locations" };
+
 export default async function LocationsPage() {
   const provider = await getProvider();
   const posts = await provider.listPosts();

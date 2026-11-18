@@ -4,6 +4,8 @@ import { ReviewsBoard } from "@/components/reviews/reviews-board";
 import { getProvider } from "@/lib/gbp";
 import { parseLocationScope } from "@/lib/location-scope";
 
+export const metadata = { title: "Reviews" };
+
 type Props = { searchParams: Promise<{ location?: string; filter?: string; review?: string }> };
 
 export default async function ReviewsPage({ searchParams }: Props) {

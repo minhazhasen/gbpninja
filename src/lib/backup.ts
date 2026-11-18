@@ -22,3 +22,14 @@ export async function backupDatabase(now = new Date()) {
   for (const f of old) await rm(path.join(dir, f), { force: true });
   return target;
 }
+
+/** Newest backup file and when it was written (Admin → Integrations), or null when there is none yet. */
+export async function latestBackup(): Promise<{ name: string; at: string } | null> {
+  const file = db.file();
+  if (!file) return null;
+  const dir = path.join(path.dirname(file), "backups");
+  const name = (await readdir(dir).catch(() => [] as string[])).filter((f) => /^app-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort().at(-1);
+  if (!name) return null;
+  const s = await stat(path.join(dir, name)).catch(() => null);
+  return s ? { name, at: s.mtime.toISOString() } : null;
+}

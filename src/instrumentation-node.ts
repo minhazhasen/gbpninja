@@ -42,9 +42,15 @@ export function startBackgroundJobs() {
     try {
       const { backupDatabase } = await import("@/lib/backup");
       const file = await backupDatabase();
-      if (file) console.log("[jobs] Database backed up to", file);
+      if (file) {
+        console.log("[jobs] Database backed up to", file);
+        const { recordJobRun } = await import("@/lib/job-runs");
+        recordJobRun("backup", true, `Saved ${file.split(/[\\/]/).pop()}`);
+      }
     } catch (e) {
       console.error("[jobs] Database backup failed:", e);
+      const { recordJobRun } = await import("@/lib/job-runs");
+      recordJobRun("backup", false, e instanceof Error ? e.message : "Failed");
     }
   };
   setInterval(publish, MINUTE).unref();

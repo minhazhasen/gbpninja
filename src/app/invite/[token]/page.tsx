@@ -6,6 +6,8 @@ import { getProvider } from "@/lib/gbp";
 import { tenantForInvite } from "@/lib/gbp/tenancy";
 import { runInTenant } from "@/lib/gbp/tenant-context";
 
+export const metadata = { title: "Join workspace" };
+
 export const dynamic = "force-dynamic";
 
 /** Public page behind an invite link. Live mode will require signing in with the invited email first. */

@@ -3,6 +3,8 @@ import { getProvider } from "@/lib/gbp";
 import { resolveLocation, type PageProps } from "@/lib/location";
 import { postForLocation } from "@/lib/posts";
 
+export const metadata = { title: "Content" };
+
 export default async function CalendarPage({ searchParams }: PageProps) {
   const { locations, location } = await resolveLocation(searchParams);
   const provider = await getProvider();

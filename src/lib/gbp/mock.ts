@@ -6,6 +6,7 @@ import { format } from "date-fns";
 import type { KeywordMonth } from "../keywords";
 import { GOOGLE_CATEGORIES, searchCategoryList } from "./categories";
 import type {
+  CompetitorDetails,
   Competitor,
   Connection,
   GbpProvider,
@@ -65,7 +66,8 @@ const withLogo = (key: string, letter: string, bg: string, rest: Photo[]): Photo
 /** Keep the derived counters in sync with the photo list. */
 export function syncPhotoStats(l: Location) {
   const ps = l.photos ?? [];
-  l.photoCount = ps.filter((p) => p.category !== "logo" && p.category !== "cover").length;
+  // Gallery photos for the audit's "10+ photos" check: videos don't count.
+  l.photoCount = ps.filter((p) => p.type !== "video" && p.category !== "logo" && p.category !== "cover").length;
   l.hasLogo = ps.some((p) => p.category === "logo");
   l.hasCoverPhoto = ps.some((p) => p.category === "cover");
   return l;
@@ -672,6 +674,39 @@ function demoReviewHistory(name: string, reviewCount: number, rating: number | n
   return out;
 }
 
+/** Demo: what a competitor's public Maps listing would show (Compare view), varied per business but stable. */
+const DEMO_SERVICES: Record<string, string[]> = {
+  "locations/1001": ["Teeth cleaning", "Teeth whitening", "Dental implants", "Invisalign", "Emergency visits"],
+  "locations/1002": ["Breakfast", "Brunch", "Coffee to go", "Vegan options", "Catering"],
+  "locations/1003": ["Personal training", "Group classes", "Yoga", "Open gym", "Nutrition coaching"],
+};
+const DEMO_AMENITIES: { group: string; items: string[] }[] = [
+  { group: "Accessibility", items: ["Wheelchair-accessible entrance", "Wheelchair-accessible parking lot", "Wheelchair-accessible restroom"] },
+  { group: "Amenities", items: ["Free Wi-Fi", "Restroom", "Gender-neutral restroom"] },
+  { group: "Payments", items: ["Credit cards", "Debit cards", "NFC mobile payments"] },
+  { group: "Parking", items: ["Free parking lot", "Free street parking"] },
+];
+function demoDetails(name: string, locationId: string, category: string, site?: string): CompetitorDetails {
+  const r = (k: string) => rand(`${name}|${k}`);
+  const daysAgo = (n: number) => format(new Date(Date.now() - n * 86_400_000), "yyyy-MM-dd");
+  const city = "Austin";
+  const services = (DEMO_SERVICES[locationId] ?? []).filter((_, i) => r(`svc${i}`) > 0.45);
+  const weekday = r("open") > 0.5 ? "8 AM–6 PM" : "9 AM–5 PM";
+  return {
+    description: r("desc") > 0.2 ? `${name} is a ${category.toLowerCase()} in ${city}. Friendly team, easy booking and convenient hours for busy schedules.` : null,
+    phone: `(512) 555-${String(1000 + Math.floor(r("ph") * 8999)).slice(0, 4)}`,
+    websiteUri: site ? `https://${site}/` : null,
+    bookingUrl: null,
+    hours: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day, i) => ({ day, text: i < 5 ? weekday : i === 5 && r("sat") > 0.4 ? "10 AM–2 PM" : "Closed" })),
+    attributes: DEMO_AMENITIES.filter((_, i) => r(`grp${i}`) > 0.35).map((g) => ({ group: g.group, items: g.items.filter((_, i) => i === 0 || r(`${g.group}${i}`) > 0.5) })),
+    starCounts: null,
+    services,
+    latestPost: r("post") > 0.35 ? { text: `New this month at ${name}: book online in seconds and see what's new.`, date: daysAgo(Math.floor(r("postd") * 60)) } : null,
+    latestReview: daysAgo(Math.floor(r("rev") * 20)),
+    claimed: r("claimed") > 0.15,
+  };
+}
+
 const toCompetitor = ([name, address, distanceKm, primaryCategory, additionalCategories, rating, reviewCount, site]: CompetitorSeed, id: string): Competitor => ({
   id,
   placeId: null,
@@ -685,6 +720,7 @@ const toCompetitor = ([name, address, distanceKm, primaryCategory, additionalCat
   websiteUri: site ? `https://${site}/` : null,
   source: "found",
   history: demoReviewHistory(name, reviewCount, rating),
+  details: demoDetails(name, id.split("/competitors/")[0], primaryCategory, site),
 });
 /** Same business: same Google cid, or same name + address. */
 const sameBusiness = (a: Pick<Competitor, "cid" | "name" | "address">, b: Pick<Competitor, "cid" | "name" | "address">) =>
@@ -1021,6 +1057,7 @@ export const mockProvider: GbpProvider = {
     c.checkError = null;
     c.rating = result.rating;
     c.reviewCount = result.reviewCount;
+    if (result.details) c.details = result.details;
     c.history = addPoint(c.history, { date: now.slice(0, 10), rating: result.rating, reviewCount: result.reviewCount });
   },
   async deleteCompetitor(id, competitorId) {
@@ -1049,6 +1086,15 @@ export const mockProvider: GbpProvider = {
     syncPhotoStats(loc);
     return added;
   },
+  async addVideo(id, video) {
+    const loc = locations.find((l) => l.id === id);
+    if (!loc) throw new Error(`Location not found: ${id}`);
+    const added: Photo = { id: `vid_${Math.random().toString(36).slice(2, 10)}`, url: "", videoUrl: video.url, type: "video", category: video.category, createdAt: new Date().toISOString() };
+    loc.photos = [...(loc.photos ?? []), added];
+    syncPhotoStats(loc);
+    return added;
+  },
+  async reloadPhotos() {},
   async updatePhoto(id, photoId, patch) {
     const loc = locations.find((l) => l.id === id);
     const photo = loc?.photos?.find((p) => p.id === photoId);

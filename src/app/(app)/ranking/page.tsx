@@ -4,6 +4,8 @@ import { getProvider } from "@/lib/gbp";
 import { resolveLocation } from "@/lib/location";
 import { scRange } from "@/lib/search-console";
 
+export const metadata = { title: "Ranking" };
+
 type Params = { location?: string; range?: string; from?: string; to?: string; compare?: string };
 
 /** Rankings come from Google Search Console for every profile: average position, clicks, impressions and CTR per search query. */

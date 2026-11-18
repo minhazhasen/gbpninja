@@ -18,6 +18,8 @@ import { OfferCard } from "@/components/offer-card";
 import { currentWorkspaceId, getWorkspace, offerFor, takenSlots, upcomingMeetingFor } from "@/lib/platform/store";
 import { meetingReminderVisible } from "@/lib/platform/types";
 
+export const metadata = { title: "Dashboard" };
+
 type Props = { searchParams: Promise<Record<string, string | undefined>> };
 
 export default async function DashboardPage({ searchParams }: Props) {

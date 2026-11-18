@@ -28,6 +28,7 @@ import {
   parseAddress,
   formatOpeningDate,
   hasContactInText,
+  nextHolidayDate,
   suggestDescription,
   type Day,
 } from "@/lib/profile";
@@ -36,6 +37,9 @@ import { Chip, FieldHead, useDraft, useSave, type OnDraft } from "./shared";
 
 const GOOGLE_URL = "https://business.google.com/";
 const DAY_NAME: Record<Day, string> = { MONDAY: "Monday", TUESDAY: "Tuesday", WEDNESDAY: "Wednesday", THURSDAY: "Thursday", FRIDAY: "Friday", SATURDAY: "Saturday", SUNDAY: "Sunday" };
+
+/** Today in the browser's time zone, yyyy-MM-dd (special hours are calendar dates, not instants). */
+const localYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export const fmtTime = (hhmm: string) => {
   const [h, m] = hhmm.split(":").map(Number);
@@ -1116,7 +1120,11 @@ export function HoursFields({ section, ctx }: { section: AuditSection; ctx: Ctx 
   const e = useEditing(ctx.onFocusField);
   const status = l.openStatus ?? "open";
   const statusLabel = status === "always_open" ? "Open 24 hours, 7 days a week" : openStatusLabel(status);
-  const special = [...(l.specialHours ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+  const todayYmd = localYmd(new Date());
+  const allSpecial = [...(l.specialHours ?? [])].sort((a, b) => a.date.localeCompare(b.date));
+  // Google keeps past special hours; only the ones still ahead matter to customers.
+  const special = allSpecial.filter((h) => h.date >= todayYmd);
+  const lastPast = allSpecial.filter((h) => h.date < todayYmd).at(-1);
   const used = new Set((l.moreHours ?? []).map((m) => m.type));
   return (
     <SectionCard section={section} total={total}>
@@ -1147,13 +1155,14 @@ export function HoursFields({ section, ctx }: { section: AuditSection; ctx: Ctx 
       <Field
         label="Special hours"
         value={
-          special.length > 0 &&
-          special.map((h) => (
-            <span key={h.date} className="block">
-              {new Date(`${h.date}T00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}:{" "}
-              {h.closed ? "Closed" : `${fmtTime(h.open!)}–${fmtTime(h.close!)}`}
-            </span>
-          ))
+          special.length > 0
+            ? special.map((h) => (
+                <span key={h.date} className="block">
+                  {new Date(`${h.date}T00:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" })}:{" "}
+                  {h.closed ? "Closed" : `${fmtTime(h.open!)}–${fmtTime(h.close!)}`}
+                </span>
+              ))
+            : lastPast && <span className="block text-muted-foreground">No upcoming dates (last one: {new Date(`${lastPast.date}T00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})</span>
         }
         checks={pick(checks, "special-hours")}
         total={total}
@@ -1268,16 +1277,32 @@ function RegularHoursEditor({ location, onDraft, onDone }: { location: Location;
 }
 
 function SpecialHoursEditor({ location, onDraft, onDone }: { location: Location; onDraft: OnDraft; onDone: () => void }) {
-  const [rows, setRows] = useState<SpecialHours[]>(location.specialHours ?? []);
+  const today = localYmd(new Date());
+  // Past dates (Google keeps them) aren't edited or sent back: saving keeps only the dates still ahead.
+  const past = (location.specialHours ?? []).filter((h) => h.date && h.date < today);
+  const [rows, setRows] = useState<SpecialHours[]>((location.specialHours ?? []).filter((h) => !h.date || h.date >= today).sort((a, b) => a.date.localeCompare(b.date)));
+  // Last year's dates carried forward (Thanksgiving stays the 4th Thursday…), minus ones already listed.
+  const carried = past
+    .map((h) => ({ ...h, date: nextHolidayDate(h.date, today) ?? "" }))
+    .filter((h, i, all) => h.date && !rows.some((r) => r.date === h.date) && all.findIndex((x) => x.date === h.date) === i);
   const clean = rows.map((h) => (h.closed ? { date: h.date, closed: true } : h));
   const bad = rows.some((h) => !h.date || (!h.closed && (!h.open || !h.close || h.close <= h.open))) || new Set(rows.map((h) => h.date)).size !== rows.length;
   useDraft(onDraft, bad ? {} : { specialHours: clean });
   const { busy, commit } = useFieldSave(location, onDone);
   const set = (i: number, patch: Partial<SpecialHours>) => setRows(rows.map((h, j) => (j === i ? { ...h, ...patch } : h)));
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   return (
     <div className="space-y-3">
+      {carried.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-xl border border-primary/20 bg-accent/40 px-4 py-3 text-sm sm:flex-row sm:items-center">
+          <span className="min-w-0 flex-1">
+            Last year you set {past.length} special date{past.length === 1 ? "" : "s"}. Use the same holidays for{" "}
+            {[...new Set(carried.map((h) => h.date.slice(0, 4)))].join(" and ")}?
+          </span>
+          <button type="button" className={buttonClass("default", "sm", "shrink-0 self-start sm:self-auto")} onClick={() => setRows([...rows, ...carried].sort((a, b) => (a.date || "9").localeCompare(b.date || "9")))}>
+            <Plus /> Copy {carried.length} date{carried.length === 1 ? "" : "s"}
+          </button>
+        </div>
+      )}
       {rows.length > 0 && (
         <div className="divide-y rounded-xl border bg-card">
           {rows.map((h, i) => (
@@ -1306,6 +1331,11 @@ function SpecialHoursEditor({ location, onDraft, onDone }: { location: Location;
       <button type="button" className={buttonClass("outline", "sm")} onClick={() => setRows([...rows, { date: "", closed: true }])}>
         <Plus /> Add a date
       </button>
+      {past.length > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {past.length} past date{past.length === 1 ? "" : "s"} on Google {past.length === 1 ? "isn't" : "aren't"} shown here and {past.length === 1 ? "is" : "are"} cleared when you save.
+        </p>
+      )}
       <EditActions onCancel={onDone} busy={busy} error={bad ? "Pick a date for each row (once each) and valid times." : null} onSave={() => commit({ specialHours: clean }, "Special hours saved")} />
     </div>
   );

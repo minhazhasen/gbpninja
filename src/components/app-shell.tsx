@@ -12,6 +12,7 @@ import {
   ChevronsUpDown,
   CircleUserRound,
   ClipboardCheck,
+  Images,
   LayoutDashboard,
   ListTodo,
   ShieldCheck,
@@ -72,6 +73,7 @@ const sections: { label: string; items: NavItem[] }[] = [
     label: "Work",
     items: [
       { href: "/audit", label: "Profile audit", icon: ClipboardCheck, count: (l) => l.issues, tone: "accent" },
+      { href: "/media", label: "Media Library", icon: Images },
       { href: "/tasks", label: "Tasks", icon: ListTodo, count: (l) => l.openTasks, tone: "accent" },
     ],
   },

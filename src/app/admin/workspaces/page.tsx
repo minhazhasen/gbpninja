@@ -6,6 +6,8 @@ import { listWorkspaces } from "@/lib/platform/store";
 import { WORKSPACE_STATUS, type WorkspaceStatus } from "@/lib/platform/types";
 import { cn } from "@/lib/utils";
 
+export const metadata = { title: "Workspaces" };
+
 const FILTERS: { key: "all" | WorkspaceStatus; label: string }[] = [
   { key: "all", label: "All" },
   { key: "active", label: "Active" },

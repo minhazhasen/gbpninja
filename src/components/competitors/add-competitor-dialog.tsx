@@ -11,7 +11,7 @@ import { addCompetitor, readMapsLink, updateCompetitor } from "@/app/(app)/actio
 import { buttonClass, inputClass } from "@/components/ui";
 import { Modal } from "@/components/ui-client";
 import { GOOGLE_CATEGORIES } from "@/lib/gbp/categories";
-import type { Competitor } from "@/lib/gbp/types";
+import type { Competitor, CompetitorDetails } from "@/lib/gbp/types";
 import { cn } from "@/lib/utils";
 
 type Form = {
@@ -25,8 +25,10 @@ type Form = {
   mapsUrl: string | null;
   cid: string | null;
   distanceKm: number | null;
+  /** The rest of the Maps listing (Compare view), when it was read from Google. Not editable. */
+  details: CompetitorDetails | null;
 };
-const empty: Form = { name: "", address: "", primaryCategory: "", additionalCategories: "", rating: "", reviewCount: "", websiteUri: "", mapsUrl: null, cid: null, distanceKm: null };
+const empty: Form = { name: "", address: "", primaryCategory: "", additionalCategories: "", rating: "", reviewCount: "", websiteUri: "", mapsUrl: null, cid: null, distanceKm: null, details: null };
 const fromCompetitor = (c: Competitor): Form => ({
   name: c.name,
   address: c.address,
@@ -38,6 +40,7 @@ const fromCompetitor = (c: Competitor): Form => ({
   mapsUrl: c.mapsUrl ?? null,
   cid: c.cid ?? null,
   distanceKm: c.distanceKm,
+  details: c.details ?? null,
 });
 
 export function CompetitorDialog({
@@ -95,6 +98,7 @@ export function CompetitorDialog({
             websiteUri: place.websiteUri ?? "",
             mapsUrl: place.mapsUrl || info.url,
             cid: place.cid ?? info.cid,
+            details: place.details,
             distanceKm: distanceKm ?? x.distanceKm,
           }
         : { ...x, name: x.name || info.name || "", mapsUrl: info.url, cid: info.cid },
@@ -128,6 +132,7 @@ export function CompetitorDialog({
       mapsUrl: f.mapsUrl,
       cid: f.cid,
       distanceKm: f.distanceKm,
+      ...(f.details ? { details: f.details } : {}),
     };
     setBusy(true);
     const res = editing ? await updateCompetitor(locationId, editing.id, input) : await addCompetitor(locationId, input);

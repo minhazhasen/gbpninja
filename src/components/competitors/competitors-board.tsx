@@ -12,7 +12,8 @@ import { ArrowDown, ArrowUp, Check, ChevronDown, ExternalLink, EyeOff, Loader2, 
 import { addCompetitor, checkCompetitorsNow, deleteCompetitor, setCompetitorHidden, updateProfile } from "@/app/(app)/actions";
 import { Badge, Card, EmptyState, PageHeader, PanelHeader, buttonClass, inputClass } from "@/components/ui";
 import { CompetitorStats, RatingValue, type StandingMetric } from "./competitor-stats";
-import { Menu } from "@/components/ui-client";
+import { Menu, Segmented } from "@/components/ui-client";
+import { CompetitorCompare, type YouDetails } from "./competitor-compare";
 import { CompetitorDialog } from "./add-competitor-dialog";
 import { ReviewGrowthChart } from "./review-growth-chart";
 import type { Competitor } from "@/lib/gbp/types";
@@ -33,7 +34,23 @@ function delta(diff: number, fmt: (n: number) => string, tolerance: number): Sta
   return { tone: diff > 0 ? "good" : "bad", text: `${diff > 0 ? "+" : "−"}${fmt(Math.abs(diff))}` };
 }
 
-export function CompetitorsBoard({ locationId, you, competitors: everyone, categoriesHref }: { locationId: string; you: Competitor; competitors: Competitor[]; categoriesHref: string }) {
+export function CompetitorsBoard({
+  locationId,
+  you,
+  youDetails,
+  competitors: everyone,
+  categoriesHref,
+  initialView = "list",
+}: {
+  /** `?view=compare` opens the Compare view (e.g. back from the services import). */
+  initialView?: "list" | "compare";
+  locationId: string;
+  you: Competitor;
+  /** Your Google profile in the Compare view's shape. */
+  youDetails: YouDetails;
+  competitors: Competitor[];
+  categoriesHref: string;
+}) {
   const router = useRouter();
   const competitors = useMemo(() => everyone.filter((c) => !c.hidden), [everyone]);
   const hidden = useMemo(() => everyone.filter((c) => c.hidden), [everyone]);
@@ -63,6 +80,7 @@ export function CompetitorsBoard({ locationId, you, competitors: everyone, categ
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "reviews", desc: true });
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState<string | null>(null);
+  const [tableView, setTableView] = useState<"list" | "compare">(initialView);
 
   const all: Row[] = useMemo(() => [{ ...you, you: true }, ...competitors], [you, competitors]);
   // Your business always stays on top; the sort and search apply to competitors.
@@ -190,7 +208,38 @@ export function CompetitorsBoard({ locationId, you, competitors: everyone, categ
 
   return (
     <div className="space-y-5 pb-8">
-      <PageHeader title="Competitors">
+      <PageHeader
+        title="Competitors"
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            {linked.length > 0 && (
+              <button
+                type="button"
+                className={buttonClass("outline")}
+                onClick={checkNow}
+                disabled={checking}
+                suppressHydrationWarning
+                title={`Ratings and reviews of added competitors update daily from Google${lastCheck ? ` · last checked ${formatDistanceToNow(parseISO(lastCheck), { addSuffix: true })}` : ""}`}
+              >
+                {checking ? <Loader2 className="animate-spin" /> : <RefreshCw />} {checking ? "Checking…" : "Check now"}
+              </button>
+            )}
+            <button
+              type="button"
+              className={buttonClass("default")}
+              onClick={() => setAddOpen(true)}
+              disabled={atLimit}
+              title={atLimit ? `You can track up to ${MAX_COMPETITORS} competitors. Remove one to add another.` : undefined}
+            >
+              <Plus /> <span className="hidden sm:inline">Add competitor</span>
+              <span className="sm:hidden">Add</span>
+              <span className="text-xs font-normal opacity-80">
+                {addedCount}/{MAX_COMPETITORS}
+              </span>
+            </button>
+          </div>
+        }
+      >
         {you.name} vs {competitors.length} nearby {you.primaryCategory.toLowerCase()} business{competitors.length === 1 ? "" : "es"}
       </PageHeader>
 
@@ -228,28 +277,36 @@ export function CompetitorsBoard({ locationId, you, competitors: everyone, categ
           meta={competitors.length}
           action={
             <div className="flex w-full items-center gap-2 sm:w-auto">
+              <Segmented
+                value={tableView}
+                onChange={setTableView}
+                size="sm"
+                label="Table view"
+                options={[
+                  { value: "list", label: "List" },
+                  { value: "compare", label: "Compare" },
+                ]}
+                className="shrink-0"
+              />
               <label className="relative min-w-0 flex-1 sm:w-64 sm:flex-none">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, category, area…" aria-label="Search competitors" className={cn(inputClass, "h-9 pl-9")} />
               </label>
-              <button
-                type="button"
-                className={buttonClass("default", "sm", "h-9")}
-                onClick={() => setAddOpen(true)}
-                disabled={atLimit}
-                title={atLimit ? `You can track up to ${MAX_COMPETITORS} competitors. Remove one to add another.` : undefined}
-              >
-                <Plus /> <span className="hidden sm:inline">Add competitor</span>
-                <span className="sm:hidden">Add</span>
-                <span className="text-xs font-normal opacity-80">
-                  {addedCount}/{MAX_COMPETITORS}
-                </span>
-              </button>
             </div>
           }
         />
         {!competitors.length ? (
           <EmptyState title="No competitors yet">We look for nearby businesses with the same main category. Use Add competitor to add one yourself.</EmptyState>
+        ) : tableView === "compare" ? (
+          <CompetitorCompare
+            you={you}
+            youDetails={youDetails}
+            // Same search and sort as the list.
+            competitors={rows.filter((r) => !r.you)}
+            yours={yours}
+            onReadNow={checkNow}
+            reading={checking}
+          />
         ) : (
           <>
             {/* lg and up: table */}
@@ -304,18 +361,6 @@ export function CompetitorsBoard({ locationId, you, competitors: everyone, categ
             </ul>
             {q && rows.length === 1 && <p className="border-t px-5 py-4 text-center text-sm text-muted-foreground">No competitors match &ldquo;{q}&rdquo;.</p>}
           </>
-        )}
-        {linked.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t px-5 py-2.5 text-xs text-muted-foreground lg:px-6">
-            <RefreshCw className="h-3.5 w-3.5" />
-            <span className="min-w-0 flex-1" suppressHydrationWarning>
-              Ratings and reviews of added competitors update daily from Google
-              {lastCheck && ` · last checked ${formatDistanceToNow(parseISO(lastCheck), { addSuffix: true })}`}
-            </span>
-            <button type="button" className={buttonClass("outline", "sm", "h-7 px-2 text-xs")} onClick={checkNow} disabled={checking}>
-              {checking ? <Loader2 className="animate-spin" /> : <RefreshCw />} {checking ? "Checking…" : "Check now"}
-            </button>
-          </div>
         )}
         {hidden.length > 0 && (
           <div className="border-t">

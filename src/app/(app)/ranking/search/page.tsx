@@ -5,6 +5,8 @@ import { resolveLocation } from "@/lib/location";
 import { scRange } from "@/lib/search-console";
 import { withLocation } from "@/lib/utils";
 
+export const metadata = { title: "Search query" };
+
 type Params = { q?: string; location?: string; range?: string; from?: string; to?: string; compare?: string };
 
 /** One Search Console query: /ranking/search?q=…&location=… */

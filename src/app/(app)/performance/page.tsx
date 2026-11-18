@@ -13,6 +13,8 @@ import { parseLocationScope } from "@/lib/location-scope";
 import { SERIES, daysNeeded, periodLabel, rangeView, type SeriesKey } from "@/lib/metrics";
 import { delta, fmt } from "@/lib/utils";
 
+export const metadata = { title: "Performance" };
+
 type Props = { searchParams: Promise<Record<string, string | undefined>> };
 
 export default async function PerformancePage({ searchParams }: Props) {

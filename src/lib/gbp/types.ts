@@ -35,6 +35,9 @@ export interface Photo {
   fromCustomer?: boolean;
   /** Views reported by Google (media `insights.viewCount`). Absent when Google doesn't report it: never estimated. */
   views?: number | null;
+  /** Videos (Media Library): `url` is then the thumbnail (may be empty) and `videoUrl` plays it. */
+  type?: "photo" | "video";
+  videoUrl?: string | null;
 }
 export type NewPhoto = Pick<Photo, "url" | "category" | "width" | "height">;
 
@@ -175,6 +178,29 @@ export interface Competitor {
   history?: CompetitorPoint[];
   /** Removed from the comparison by the workspace (kept so it can be restored). */
   hidden?: boolean;
+  /** The rest of its public Google Maps listing (Compare view), saved when added and by the daily check. */
+  details?: CompetitorDetails | null;
+}
+
+/** What a public Google Maps listing shows beyond rating and reviews. Every field is optional on Google's side. */
+export interface CompetitorDetails {
+  description: string | null;
+  phone: string | null;
+  websiteUri: string | null;
+  bookingUrl: string | null;
+  /** Day name ("Monday") + Google's text ("9 AM–5 PM", "Closed"). */
+  hours: { day: string; text: string }[];
+  /** Amenity groups as Maps shows them ("Accessibility" → ["Wheelchair-accessible entrance"]). */
+  attributes: { group: string; items: string[] }[];
+  /** Reviews per star, "1"…"5". */
+  starCounts: Record<string, number> | null;
+  /** Services reviewers say they used (Google doesn't publish a business's own services list). */
+  services: string[];
+  latestPost: { text: string; date: string | null } | null;
+  /** Newest of the few reviews the listing carries (yyyy-MM-dd); not necessarily the newest review overall. */
+  latestReview: string | null;
+  /** Claimed by its owner on Google. */
+  claimed: boolean;
 }
 
 /** One daily check of a competitor's Google profile. */
@@ -186,7 +212,9 @@ export interface CompetitorPoint {
 }
 
 /** What's saved when adding / editing a competitor: read from its Google Maps link (src/lib/maps-scrape.ts), then checked by the user. */
-export type CompetitorInput = Pick<Competitor, "name" | "address" | "primaryCategory" | "additionalCategories" | "rating" | "reviewCount" | "websiteUri" | "mapsUrl" | "cid" | "distanceKm">;
+export type CompetitorInput = Pick<Competitor, "name" | "address" | "primaryCategory" | "additionalCategories" | "rating" | "reviewCount" | "websiteUri" | "mapsUrl" | "cid" | "distanceKm"> & {
+  details?: CompetitorDetails | null;
+};
 
 export interface Review {
   id: string;
@@ -261,6 +289,10 @@ export interface GbpProvider {
   addPhotos(locationId: string, photos: NewPhoto[]): Promise<Photo[]>;
   updatePhoto(locationId: string, photoId: string, patch: { category: PhotoCategory }): Promise<Photo>;
   deletePhoto(locationId: string, photoId: string): Promise<void>;
+  /** A video uploaded to the app (`url` = its link at /api/media/…) added to the profile (live: sent to Google). */
+  addVideo(locationId: string, video: { url: string; category: PhotoCategory }): Promise<Photo>;
+  /** Read the profile's photos and videos from Google again (Media Library "Reload from Google"; no-op in demo). */
+  reloadPhotos(locationId: string): Promise<void>;
   /** Ideas to complete the profile: secondary categories, services (from the website and the local market), attributes. */
   getProfileSuggestions(locationId: string): Promise<ProfileSuggestions>;
   /** Typeahead over Google's business categories (Business Information `categories.list`). */
@@ -270,7 +302,7 @@ export interface GbpProvider {
   /** Add a competitor from its Google Maps link + typed details; the same business (cid or name + address) is updated and restored instead. */
   addCompetitor(locationId: string, input: CompetitorInput): Promise<Competitor>;
   /** Save a daily check of an added competitor: new rating + review count (one history point per day), or why it failed. */
-  recordCompetitorCheck(locationId: string, competitorId: string, result: { rating: number | null; reviewCount: number } | { error: string }): Promise<void>;
+  recordCompetitorCheck(locationId: string, competitorId: string, result: { rating: number | null; reviewCount: number; details?: CompetitorDetails | null } | { error: string }): Promise<void>;
   /** Edit an added competitor's details (e.g. new rating / review count). */
   updateCompetitor(locationId: string, competitorId: string, input: CompetitorInput): Promise<Competitor>;
   /** Delete a competitor the workspace added (found ones are hidden instead, see setCompetitorHidden). */

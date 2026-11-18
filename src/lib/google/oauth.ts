@@ -147,10 +147,23 @@ export async function googleAccessToken(purpose: GooglePurpose): Promise<string>
     );
   if (t.expiresAt.getTime() - Date.now() > 60_000) return open(t.accessToken);
   if (!t.refreshToken) throw new Error("Google access expired. Disconnect and connect again.");
+  // Calls made at the same time (a page loads several things at once) share one refresh.
+  const key = tokenKey(purpose);
+  const running = refreshing.get(key);
+  if (running) return running;
+  const p = refreshAccess(purpose, open(t.refreshToken)).finally(() => refreshing.delete(key));
+  refreshing.set(key, p);
+  return p;
+}
+
+const gRefresh = globalThis as unknown as { __gbpnTokenRefresh?: Map<string, Promise<string>> };
+const refreshing = (gRefresh.__gbpnTokenRefresh ??= new Map());
+
+async function refreshAccess(purpose: GooglePurpose, refreshToken: string): Promise<string> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID!, client_secret: process.env.GOOGLE_CLIENT_SECRET!, refresh_token: open(t.refreshToken), grant_type: "refresh_token" }),
+    body: new URLSearchParams({ client_id: process.env.GOOGLE_CLIENT_ID!, client_secret: process.env.GOOGLE_CLIENT_SECRET!, refresh_token: refreshToken, grant_type: "refresh_token" }),
   });
   const tok = (await res.json()) as { access_token?: string; expires_in?: number; error?: string };
   if (!res.ok || !tok.access_token) throw new Error(tok.error === "invalid_grant" ? "Google access was removed. Disconnect and connect again." : "Couldn't refresh Google access. Try again.");

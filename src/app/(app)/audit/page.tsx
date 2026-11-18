@@ -6,6 +6,8 @@ import { resolveLocation } from "@/lib/location";
 import { categoryUsage } from "@/lib/competitors";
 import type { CheckTask } from "@/components/audit/check-task-dialog";
 
+export const metadata = { title: "Profile audit" };
+
 export default async function AuditPage({ searchParams }: { searchParams: Promise<{ location?: string; tab?: string }> }) {
   const { location } = await resolveLocation(searchParams);
   const { tab } = await searchParams;

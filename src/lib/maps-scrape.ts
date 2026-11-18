@@ -4,6 +4,7 @@
 // Unofficial: Google's terms don't allow scraping and the format can change without notice — callers must handle `null`
 // (the form then stays manual). Keep it to occasional, user-triggered lookups.
 import { distanceKm, parseMapsLink } from "./maps-link";
+import type { CompetitorDetails } from "@/lib/gbp/types";
 
 export interface ScrapedPlace {
   name: string;
@@ -21,6 +22,8 @@ export interface ScrapedPlace {
   placeId: string | null;
   /** The resolved full Maps link. */
   mapsUrl: string;
+  /** Description, hours, amenities, latest post… (Compare view). */
+  details: CompetitorDetails;
 }
 
 const UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -58,6 +61,47 @@ const at = (o: unknown, ...path: number[]): unknown => path.reduce<unknown>((v, 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+/**
+ * The rest of a public Maps listing. Every field is optional: Google leaves out what a business hasn't filled in.
+ * Services: Google doesn't publish a business's own list, but reviewers pick the service they used ("Private lessons"),
+ * so those are collected from the reviews on the listing.
+ */
+function placeDetails(p: unknown): CompetitorDetails {
+  const list = (v: unknown) => (Array.isArray(v) ? v : []);
+  const hours = list(at(p, 203, 0)).flatMap((d) => {
+    const day = str(at(d, 0));
+    const text = list(at(d, 3)).map((t) => str(at(t, 0))).filter(Boolean).join(", ");
+    return day ? [{ day, text: text || "—" }] : [];
+  });
+  const attributes = list(at(p, 100, 1)).flatMap((grp) => {
+    // [2][0] is 1 when the business has it; 0 marks a "doesn't have" entry.
+    const items = list(at(grp, 2)).flatMap((it) => (str(at(it, 1)) && at(it, 2, 0) !== 0 ? [str(at(it, 1))!] : []));
+    return items.length ? [{ group: str(at(grp, 1)) ?? "Other", items }] : [];
+  });
+  const sc = at(p, 175, 3);
+  const starCounts = Array.isArray(sc) && sc.length === 5 ? Object.fromEntries(sc.map((n, i) => [String(i + 1), Number(n) || 0])) : null;
+  const raw = JSON.stringify(p);
+  const services = [...new Set([...raw.matchAll(/"job_type_id:[a-z0-9_]+"\],"([^"]{2,60})"/g)].map((m) => JSON.parse(`"${m[1]}"`) as string))];
+  const booking = JSON.stringify(at(p, 75) ?? null).match(/"(https?:\/\/[^"]+)"/)?.[1] ?? null;
+  // Microsecond timestamps of the few reviews the listing carries (Google's "most relevant", not a full list).
+  const stamps = [...JSON.stringify(at(p, 175, 9) ?? null).matchAll(/\b(1[6-9]\d{14})\b/g)].map((m) => Number(m[1]));
+  const postText = str(at(p, 122, 1, 0, 1, 0, 0, 0));
+  const postTs = num(at(p, 122, 1, 0, 2, 0));
+  return {
+    description: str(at(p, 154, 0, 0)),
+    phone: str(at(p, 178, 0, 0)),
+    websiteUri: str(at(p, 7, 0)),
+    bookingUrl: booking,
+    hours,
+    attributes,
+    starCounts,
+    services,
+    latestPost: postText ? { text: postText.slice(0, 600), date: postTs && postTs > 1e9 ? new Date(postTs * 1000).toISOString().slice(0, 10) : null } : null,
+    latestReview: stamps.length ? new Date(Math.max(...stamps) / 1000).toISOString().slice(0, 10) : null,
+    claimed: at(p, 57) != null,
+  };
+}
+
 /** One place in Maps' array layout → our fields. */
 function fromPlace(p: unknown, mapsUrl: string): ScrapedPlace | null {
   const name = str(at(p, 11));
@@ -85,6 +129,7 @@ function fromPlace(p: unknown, mapsUrl: string): ScrapedPlace | null {
     cid,
     placeId: str(at(p, 78)),
     mapsUrl,
+    details: placeDetails(p),
   };
 }
 
@@ -103,6 +148,17 @@ async function searchFeed(get: ReturnType<typeof session>, query: string, mapsUr
   return places;
 }
 
+/** The full place from a page that preloads it (the place page or a cid page). */
+async function preloadedPlace(get: ReturnType<typeof session>, page: { text: string }, mapsUrl: string) {
+  const href = page.text.match(/href="(\/maps\/preview\/place\?[^"]+)"/)?.[1];
+  if (!href) return null;
+  const url = `https://www.google.com${href
+    .replace(/&amp;/g, "&")
+    .replace(/([?&])hl=[^&]*/, "$1hl=en")
+    .replace(/([?&])gl=[^&]*/, "$1gl=us")}`;
+  return fromPlace(at(parseFeed((await get(url)).text), 6), mapsUrl);
+}
+
 /** Read the place a Google Maps link points to. null when Google gives nothing usable (the form stays manual). */
 export async function scrapeMapsLink(link: string): Promise<ScrapedPlace | null> {
   const get = session();
@@ -113,20 +169,19 @@ export async function scrapeMapsLink(link: string): Promise<ScrapedPlace | null>
     let page = first;
     // Links that only carry an id (?cid=, ?vet=…&ftid=): the cid page preloads that exact place.
     if (info.cid && !/[?&]cid=/.test(first.url)) page = await get(`https://www.google.com/maps?cid=${info.cid}&hl=en`);
-    const href = page.text.match(/href="(\/maps\/preview\/place\?[^"]+)"/)?.[1];
-    if (href) {
-      const url = `https://www.google.com${href
-        .replace(/&amp;/g, "&")
-        .replace(/([?&])hl=[^&]*/, "$1hl=en")
-        .replace(/([?&])gl=[^&]*/, "$1gl=us")}`;
-      const place = fromPlace(at(parseFeed((await get(url)).text), 6), info.url);
-      if (place && (!info.cid || !place.cid || place.cid === info.cid)) return place;
-    }
+    const place = await preloadedPlace(get, page, info.url);
+    if (place && (!info.cid || !place.cid || place.cid === info.cid)) return place;
     // Name-only links (/maps/search/…, ?q=…): search, preferring the result with the link's place id.
     if (info.name) {
       const near = info.lat != null && info.lng != null ? ` near ${info.lat},${info.lng}` : "";
       const results = await searchFeed(get, `${info.name}${near}`, info.url);
-      return results.find((r) => info.cid && r.cid === info.cid) ?? results[0] ?? null;
+      const hit = results.find((r) => info.cid && r.cid === info.cid) ?? results[0] ?? null;
+      // Search results carry less (no reviews, posts or owner badge): read the full place by its id when we can.
+      if (hit?.cid) {
+        const full = await preloadedPlace(get, await get(`https://www.google.com/maps?cid=${hit.cid}&hl=en`), hit.mapsUrl).catch(() => null);
+        if (full && full.cid === hit.cid) return full;
+      }
+      return hit;
     }
     return null;
   } catch {
