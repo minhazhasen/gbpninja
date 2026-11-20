@@ -24,7 +24,7 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
       <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6 sm:py-14">
         <article className="space-y-9 rounded-2xl border bg-card p-6 sm:p-10">{children}</article>
         <p className="mt-8 text-center text-xs text-muted-foreground">
-          © 2026 {LEGAL.product} ·{" "}
+          © 2026 {LEGAL.operator} · {LEGAL.product} ·{" "}
           <a href={`mailto:${LEGAL.contactEmail}`} className="hover:underline">
             {LEGAL.contactEmail}
           </a>
