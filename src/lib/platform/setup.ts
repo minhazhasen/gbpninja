@@ -57,7 +57,7 @@ export async function setupChecklist(): Promise<SetupItem[]> {
     // ---------------------------------------------------------------- apps and the server
     { group: "Server", label: "Session secret", ok: has("SESSION_SECRET"), hint: "SESSION_SECRET", note: "Signs sign-in cookies and encrypts saved Google, Meta and LinkedIn tokens." },
     { group: "Firebase", label: "Firebase sign-in", ok: has(...firebase), hint: "NEXT_PUBLIC_FIREBASE_* (API key, auth domain, project id, app id)", note: "Login with Google and email. Without it the app is an open demo." },
-    { group: "Google", label: "OAuth client", ok: has(...CHANNEL_ENV.google), hint: CHANNEL_ENV.google.join(" / "), note: "Connect Business Profiles, Gmail and Search Console." },
+    { group: "Google", label: "OAuth client", ok: has(...CHANNEL_ENV.google), hint: CHANNEL_ENV.google.join(" / "), note: "Connect Business Profiles and Search Console." },
     publicUrl("Google", "Redirect link", "GOOGLE_REDIRECT_URI", "Must match the link on the Google OAuth client (the site's address + \"/\")."),
     { group: "Google", label: "Live Google data", ok: !isDemo(), hint: "GBP_DATA_SOURCE=google", note: isDemo() ? "Showing sample data." : "Real Business Profile data." },
     publicUrl("Server", "Public address", "APP_URL", "For invite links and photos/videos sent to Google and Instagram."),

@@ -11,12 +11,11 @@ type Props = { searchParams: Promise<{ location?: string; filter?: string; revie
 export default async function ReviewsPage({ searchParams }: Props) {
   const { location, filter, review } = await searchParams;
   const provider = await getProvider();
-  const [locations, members, requests, templates, sender] = await Promise.all([
+  const [locations, members, requests, templates] = await Promise.all([
     provider.listLocations(),
     provider.listTeamMembers(),
     provider.listReviewRequests(),
     provider.listTemplates(),
-    provider.getEmailSender(),
   ]);
   const titleOf = (id: string) => locations.find((l) => l.id === id)?.title ?? "Location";
   const reviews = (await Promise.all(locations.map((l) => provider.listReviews(l.id)))).flat().map((r) => ({ ...r, locationTitle: titleOf(r.locationId) }));
@@ -35,8 +34,6 @@ export default async function ReviewsPage({ searchParams }: Props) {
       initialStatus={filter === "unreplied" ? "reply" : filter === "attention" ? "attention" : "all"}
       initialReviewId={review && reviews.some((r) => r.id === review) ? review : undefined}
       templates={templates}
-      sender={sender}
-      settingsHref={`/settings?tab=email${scope.length === 1 ? `&location=${encodeURIComponent(scope[0])}` : ""}`}
       reviews={reviews}
       requests={requests.map((r) => ({ ...r, locationTitle: titleOf(r.locationId) }))}
       members={members}

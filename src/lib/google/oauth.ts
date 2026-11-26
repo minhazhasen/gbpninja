@@ -1,5 +1,6 @@
-// Google OAuth for connecting accounts (not app sign-in — that's Firebase): Gmail (gmail.send) and Google Business Profile
-// (business.manage). Authorization-code flow with offline access; tokens are stored per purpose in Prisma (`GoogleToken`),
+// Google OAuth for connecting accounts (not app sign-in — that's Firebase): Google Business Profile (business.manage) and
+// Search Console (webmasters.readonly). Gmail was removed so the app needs no sensitive-scope verification; don't add scopes
+// without updating the Privacy Policy and the OAuth consent screen. Authorization-code flow with offline access; tokens are stored per purpose in Prisma (`GoogleToken`),
 // encrypted, and refreshed on demand. The redirect URI (GOOGLE_REDIRECT_URI, default "<origin>/") is handled by src/app/route.ts.
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
@@ -7,11 +8,10 @@ import { SignJWT, jwtVerify } from "jose";
 import { db } from "@/lib/db";
 import { currentTenant } from "@/lib/gbp/tenant-context";
 
-export type GooglePurpose = "gbp" | "gmail" | "searchconsole";
+export type GooglePurpose = "gbp" | "searchconsole";
 
 const SCOPES: Record<GooglePurpose, string[]> = {
   gbp: ["https://www.googleapis.com/auth/business.manage"],
-  gmail: ["https://www.googleapis.com/auth/gmail.send"],
   searchconsole: ["https://www.googleapis.com/auth/webmasters.readonly"],
 };
 const BASE_SCOPES = ["openid", "email", "profile"];
@@ -71,7 +71,7 @@ export async function finishGoogleAuth(url: URL): Promise<{ purpose: GooglePurpo
   let returnTo = "/settings";
   try {
     const { payload } = await jwtVerify(url.searchParams.get("state")!, secret(), { algorithms: ["HS256"] });
-    purpose = payload.purpose === "gbp" || payload.purpose === "gmail" || payload.purpose === "searchconsole" ? payload.purpose : null;
+    purpose = payload.purpose === "gbp" || payload.purpose === "searchconsole" ? payload.purpose : null;
     returnTo = typeof payload.returnTo === "string" && payload.returnTo.startsWith("/") && !payload.returnTo.startsWith("//") ? payload.returnTo : returnTo;
     const jar = await cookies();
     const nonce = jar.get(STATE_COOKIE)?.value;
@@ -105,9 +105,7 @@ export async function finishGoogleAuth(url: URL): Promise<{ purpose: GooglePurpo
       purpose,
       returnTo,
       error:
-        purpose === "gmail"
-          ? "Tick “Send email on your behalf” on Google's page to connect Gmail."
-          : purpose === "searchconsole"
+        purpose === "searchconsole"
             ? "Tick “View Search Console data for your verified sites” on Google's page to connect Search Console."
             : "Tick “See, edit, create and delete your Google business listings” to connect.",
     };
@@ -143,7 +141,7 @@ export async function googleAccessToken(purpose: GooglePurpose): Promise<string>
   const t = await db.googleToken.findUnique({ where: { purpose: tokenKey(purpose) } });
   if (!t)
     throw new Error(
-      purpose === "gmail" ? "Connect Gmail in Settings → Email first" : purpose === "searchconsole" ? "Connect Google Search Console first" : "Connect Google Business Profile in Settings first",
+      purpose === "searchconsole" ? "Connect Google Search Console first" : "Connect Google Business Profile in Settings first",
     );
   if (t.expiresAt.getTime() - Date.now() > 60_000) return open(t.accessToken);
   if (!t.refreshToken) throw new Error("Google access expired. Disconnect and connect again.");
@@ -199,4 +197,16 @@ export async function disconnectGoogle(purpose: GooglePurpose) {
   const token = t.refreshToken ? open(t.refreshToken) : open(t.accessToken);
   await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, { method: "POST" }).catch(() => {});
   await db.googleToken.delete({ where: { purpose: tokenKey(purpose) } });
+}
+
+/**
+ * Gmail (gmail.send) was removed from the app. Revokes and deletes any Gmail tokens saved before that, so no workspace keeps
+ * a Gmail grant we no longer use. Runs once per server start (startBackgroundJobs); a no-op when none are left.
+ */
+export async function revokeRetiredGoogleTokens() {
+  for (const t of await db.googleToken.findManyBySuffix("gmail")) {
+    const token = t.refreshToken ? open(t.refreshToken) : open(t.accessToken);
+    await fetch(`https://oauth2.googleapis.com/revoke?token=${encodeURIComponent(token)}`, { method: "POST" }).catch(() => {});
+    await db.googleToken.delete({ where: { purpose: t.purpose } });
+  }
 }

@@ -95,14 +95,6 @@ export function createGoogleProvider(accessToken: string): GbpProvider {
     disconnectSearchConsole: notImplemented("disconnectSearchConsole"),
     getSearchConsoleReport: notImplemented("getSearchConsoleReport"),
     getSearchConsoleQuery: notImplemented("getSearchConsoleQuery"),
-    // Gmail: same Google sign-in with the https://www.googleapis.com/auth/gmail.send scope (incremental auth).
-    //   Send: POST https://gmail.googleapis.com/gmail/v1/users/me/messages/send { raw: base64url(RFC 2822 message) }
-    //   Address: GET https://gmail.googleapis.com/gmail/v1/users/me/profile → emailAddress. Sender settings + templates live in our DB.
-    getEmailSender: notImplemented("getEmailSender"),
-    connectGmail: notImplemented("connectGmail"),
-    updateEmailSender: notImplemented("updateEmailSender"),
-    disconnectGmail: notImplemented("disconnectGmail"),
-    sendEmail: notImplemented("sendEmail"),
     listTemplates: notImplemented("listTemplates"),
     saveTemplate: notImplemented("saveTemplate"),
     deleteTemplate: notImplemented("deleteTemplate"),

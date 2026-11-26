@@ -25,7 +25,6 @@ import type {
   Task,
   TaskInput,
   TeamMember,
-  EmailSender,
   MessageTemplate,
 } from "./types";
 import { STARTER_TEMPLATES } from "../templates";
@@ -35,7 +34,6 @@ import { getSessionUser } from "../current-user";
 import { currentTenant } from "./tenant-context";
 import { disconnectGoogle, googleAccount, googleOAuthConfigured } from "../google/oauth";
 import { listGbpLocations } from "../google/business";
-import { sendGmail } from "../google/gmail";
 import { disconnectMeta, metaAccount, metaConfigured, metaPages } from "../meta/oauth";
 import { deleteFromFacebook, publishToFacebook, publishToInstagram } from "../meta/publish";
 import { disconnectLinkedin, linkedinAccount, linkedinConfigured } from "../linkedin/oauth";
@@ -298,7 +296,6 @@ export interface MockState {
   postSeq: number;
   /** Per-profile allowance (changes when a request is approved). */
   searchConsole: SearchConsoleConnection;
-  emailSender: EmailSender;
   templates: MessageTemplate[];
   tasks: Task[];
   /** Review ids whose follow-up task was deleted, so it isn't created again. */
@@ -851,7 +848,6 @@ export function emptyState(): MockState {
     searchConsole: { status: "not_connected", sites: {} },
     tasks: [],
     dismissedReviewTasks: new Set(),
-    emailSender: { status: "not_connected", sentToday: 0, dailyLimit: 500 },
     templates: STARTER_TEMPLATES.map((t, i) => ({ ...t, id: `tpl${i + 1}`, updatedAt: new Date().toISOString() })),
     competitorEdits: {},
   };
@@ -872,8 +868,6 @@ export function seedState(): MockState {
     searchConsole: { status: "not_connected", sites: {} },
     tasks: seedTasks(),
     dismissedReviewTasks: new Set(),
-    // Demo: Gmail starts disconnected so Settings → Email shows the connect flow.
-    emailSender: { status: "not_connected", sentToday: 0, dailyLimit: 500 },
     templates: STARTER_TEMPLATES.map((t, i) => ({ ...t, id: `tpl${i + 1}`, updatedAt: new Date(Date.now() - (i + 2) * 86_400_000).toISOString() })),
   } as MockState);
 }
@@ -1410,38 +1404,6 @@ export const mockProvider: GbpProvider = {
   async syncConnections(channel) {
     const now = new Date().toISOString();
     for (const c of state.connections) if (isLive(c) && (!channel || c.channel === channel)) c.lastSyncAt = now;
-  },
-  async getEmailSender() {
-    // Real Gmail (GOOGLE_CLIENT_ID set): connected = a stored Gmail token. Name and today's count stay in memory.
-    if (googleOAuthConfigured()) {
-      const account = await googleAccount("gmail");
-      state.emailSender = account
-        ? { ...state.emailSender, status: "connected", email: account.email, connectedAt: account.connectedAt }
-        : { status: "not_connected", sentToday: state.emailSender.sentToday, dailyLimit: state.emailSender.dailyLimit, fromName: state.emailSender.fromName };
-    }
-    return state.emailSender;
-  },
-  async connectGmail(email) {
-    // Demo stand-in for Google sign-in with the gmail.send scope (real sign-ins pass the Gmail address).
-    state.emailSender = { ...state.emailSender, status: "connected", email: email ?? "owner@example.com", connectedAt: new Date().toISOString() };
-    return state.emailSender;
-  },
-  async updateEmailSender(patch) {
-    Object.assign(state.emailSender, patch);
-    return state.emailSender;
-  },
-  async disconnectGmail() {
-    if (googleOAuthConfigured()) await disconnectGoogle("gmail");
-    state.emailSender = { status: "not_connected", sentToday: state.emailSender.sentToday, dailyLimit: state.emailSender.dailyLimit, fromName: state.emailSender.fromName };
-  },
-  async sendEmail(message) {
-    const s = await mockProvider.getEmailSender();
-    if (s.status !== "connected") throw new Error("Connect Gmail in Settings → Email to send emails");
-    if (s.sentToday >= s.dailyLimit) throw new Error(`Gmail's daily limit of ${s.dailyLimit} emails is reached. Try again tomorrow.`);
-    // Real Gmail sends for real; the simulated one (no OAuth client) sends nothing and just counts it like Gmail would.
-    if (googleOAuthConfigured() && s.email)
-      await sendGmail({ from: s.email, fromName: message.fromName ?? s.fromName, to: message.to, subject: message.subject, body: message.body, html: message.html });
-    s.sentToday += 1;
   },
   async listTemplates() {
     return state.templates;

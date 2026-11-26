@@ -2,7 +2,7 @@
 import type { MessageTemplate, StarRating, TemplateKind } from "@/lib/gbp/types";
 
 export const TEMPLATE_KINDS: { key: TemplateKind; label: string; short: string; hint: string }[] = [
-  { key: "request_email", label: "Review request emails", short: "Request emails", hint: "Sent from your Gmail when you ask a customer for a review." },
+  { key: "request_email", label: "Review request emails", short: "Request emails", hint: "Opened in your mail app when you ask a customer for a review." },
   { key: "request_sms", label: "Review request texts", short: "Request texts", hint: "Opened in your phone's messages app. Keep it short." },
   { key: "reply", label: "Review replies", short: "Review replies", hint: "Public replies on Google. Suggested by star rating in the review dialog." },
 ];
@@ -33,26 +33,6 @@ export function mergeTemplate(tpl: string, vars: MergeVars) {
     .replace(/\{\{\s*full_name\s*\}\}/gi, full || "there")
     .replace(/\{\{\s*(business|company)\s*\}\}/gi, business)
     .replace(/\{\{\s*link\s*\}\}/gi, (vars.link || "").trim());
-}
-
-/** The review link merge field. Request emails keep it unmerged until sending, where it becomes a button. */
-export const LINK_TOKEN = "{{link}}";
-const LINK_RE = /\{\{\s*link\s*\}\}/i;
-export const splitOnLink = (text: string) => text.split(LINK_RE);
-export const REVIEW_BUTTON_LABEL = "Leave a Google review";
-
-const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-
-/** HTML for a request email: text with line breaks, {{link}} as a "Leave a Google review" button.
- *  Email clients ignore CSS variables and classes, so colours are inline (brand primary #3D5BE0). */
-export function emailHtml(text: string, link: string | null, buttonLabel = REVIEW_BUTTON_LABEL) {
-  const button = link
-    ? `<a href="${escapeHtml(link)}" style="display:inline-block;padding:10px 20px;border-radius:999px;background:#3D5BE0;color:#ffffff;font-weight:600;text-decoration:none">${escapeHtml(buttonLabel)}</a>`
-    : "";
-  const body = splitOnLink(text)
-    .map((part) => escapeHtml(part).replace(/\r?\n/g, "<br>"))
-    .join(button);
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.6;color:#1f2937">${body}</div>`;
 }
 
 /** Data used for live previews in Settings. */

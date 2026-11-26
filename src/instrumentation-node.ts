@@ -54,6 +54,15 @@ export function startBackgroundJobs() {
     }
   };
   setInterval(publish, MINUTE).unref();
+  // Gmail was removed: revoke tokens saved before that (once, shortly after start).
+  setTimeout(async () => {
+    try {
+      const { revokeRetiredGoogleTokens } = await import("@/lib/google/oauth");
+      await revokeRetiredGoogleTokens();
+    } catch (e) {
+      console.error("[jobs] Revoking old Gmail tokens failed:", e);
+    }
+  }, 30_000).unref();
   // First backup a minute after start, then checked every hour (one file per day).
   setTimeout(backup, MINUTE).unref();
   setInterval(backup, 60 * MINUTE).unref();

@@ -17,7 +17,7 @@ import { ReviewAvatar, ReviewStars, StarBars } from "@/components/reviews/review
 import { RequestReviewDialog, ReviewDialog, type ReviewRow } from "@/components/reviews/review-dialogs";
 import { updateReview, updateReviewRequest } from "@/app/(app)/actions";
 import { makeRange, previousRange, rangeLabel, type DateRangeValue } from "@/lib/date-ranges";
-import type { EmailSender, MessageTemplate, ReviewRequest, ReviewRequestStatus, TeamMember } from "@/lib/gbp/types";
+import type { MessageTemplate, ReviewRequest, ReviewRequestStatus, TeamMember } from "@/lib/gbp/types";
 import { csvFilename } from "@/lib/csv";
 import { serializeLocationScope } from "@/lib/location-scope";
 import {
@@ -63,12 +63,8 @@ export function ReviewsBoard({
   initialStatus = "all",
   initialReviewId,
   templates,
-  sender,
-  settingsHref,
 }: {
   templates: MessageTemplate[];
-  sender: EmailSender;
-  settingsHref: string;
   reviews: ReviewRow[];
   requests: (ReviewRequest & { locationTitle: string })[];
   members: TeamMember[];
@@ -731,8 +727,6 @@ export function ReviewsBoard({
         locations={locations}
         defaultLocationId={singleLocation?.id ?? locations[0]?.id ?? ""}
         templates={templates}
-        sender={sender}
-        settingsHref={settingsHref}
       />
 
       {completing &&

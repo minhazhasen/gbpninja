@@ -28,7 +28,7 @@ export default function TermsPage() {
       <Section id="google" title="3. Connecting Google and other services">
         <ul>
           <li>
-            You may connect only Business Profiles, Gmail accounts and Search Console properties that you own or are authorized to manage. When you connect them, you let {product} act on them for the
+            You may connect only Business Profiles and Search Console properties that you own or are authorized to manage. When you connect them, you let {product} act on them for the
             features you use.
           </li>
           <li>

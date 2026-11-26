@@ -36,15 +36,17 @@ a content calendar for posts, and a profile audit with in-app fixes.
 - TODO: map the signed-in email to a workspace member/role (roles still come from `getCurrentMember()`).
 - Connecting Google accounts (separate from sign-in): `src/lib/google/oauth.ts` — our own OAuth client (`GOOGLE_CLIENT_ID/SECRET`,
   redirect `GOOGLE_REDIRECT_URI` = `http://localhost:3001/`, handled by `src/app/route.ts` at "/"). Purposes `gbp` (business.manage) and
-  `gmail` (gmail.send); signed `state` + nonce cookie; tokens in Prisma `GoogleToken` (AES-256-GCM via SESSION_SECRET), auto-refresh,
-  revoke on disconnect. `connectGmail` / `connectChannel("google")` return `{ redirect }` to Google's consent page; back at Settings
+  `searchconsole` (webmasters.readonly) — no Gmail: `gmail.send` was removed (Nov 2026) because it was the only sensitive scope and
+  needed Google's app verification; don't add sensitive scopes back without that. Old `<ws>:gmail` tokens are revoked once on start
+  (`revokeRetiredGoogleTokens`). Signed `state` + nonce cookie; tokens in Prisma `GoogleToken` (AES-256-GCM via SESSION_SECRET), auto-refresh,
+  revoke on disconnect. `connectChannel("google")` / `connectSearchConsole` return `{ redirect }` to Google's consent page; back at Settings
   (`?connected=` / `?oauth_error=`, `settings/oauth-return.tsx`). With the client set, even demo mode uses the real Google account:
-  Gmail sends for real (`src/lib/google/gmail.ts`), the Google location picker lists real Business Profiles (`src/lib/google/business.ts`,
+  the Google location picker lists real Business Profiles (`src/lib/google/business.ts`,
   quota-0 / API-disabled errors explained). Profile data itself is still mock until `google.ts` is implemented (GBP_DATA_SOURCE=google).
 
 - Legal pages (public, no sign-in; excluded in middleware): `/privacy` and `/terms` in `src/app/(legal)/` (shared `legal.tsx`: `LEGAL`
   product / homepage / contact email / date, `Section`, `LegalLinks`). The Privacy Policy carries Google's required Limited Use statement
-  and describes each scope (business.manage, gmail.send, webmasters.readonly) — keep it in sync when scopes change. Linked from the login
+  and describes each scope (business.manage, webmasters.readonly) — keep it in sync when scopes change. Linked from the login
   page and the Sign up agreement line; these URLs go on the Google OAuth consent screen (Branding).
 
 ## Architecture
@@ -53,7 +55,7 @@ a content calendar for posts, and a profile audit with in-app fixes.
   `workspaceIdFor`, `resolveTenant`, `forEachWorkspace`, `tenantForInvite`, `assignUserWorkspace`, migration of the old shared
   workspace) + `tenant-context.ts` (AsyncLocalStorage). `getProvider()` binds every call to the caller's workspace and saves it
   (`AppState "workspace:<id>"`); mock.ts state is a per-workspace view (`current()`), and in live mode a call outside a workspace
-  throws instead of falling back to shared data. Google tokens are keyed `<workspace id>:gbp|gmail` (oauth.ts `tokenKey`); the OAuth
+  throws instead of falling back to shared data. Google tokens are keyed `<workspace id>:gbp|searchconsole` (oauth.ts `tokenKey`); the OAuth
   callback, invite page, cron (`forEachWorkspace`) and `after()` jobs run inside the right workspace explicitly. Platform store:
   `currentWorkspaceId()` is async and per workspace (offers, meetings); real workspaces appear in Admin → Workspaces; suspended
   workspaces are blocked in the app layout. Anything new that stores workspace data must go through the provider (or take the
@@ -116,13 +118,11 @@ a content calendar for posts, and a profile audit with in-app fixes.
   to public media and calls provider `addVideo`. Live: photos (audit and Media Library) and videos are created on Google with v4 `media`
   `sourceUrl` = the app's public link (`publicMediaUrl` / `/api/media/<name>`, which serves byte ranges), so uploads need the live site
   (refused on localhost); then `refreshPhotos(force)`. Demo keeps them in the app.
-- Settings has tabs via `?tab=` (page owns PageHeader + PillTabs): `accounts` (connections-board, Data sources), `email`
-  (`settings/email-settings.tsx`: Gmail sender — provider `getEmailSender/connectGmail/updateEmailSender/disconnectGmail/sendEmail`,
-  gmail.send scope, daily limit), `templates` (`settings/templates-board.tsx`: request email / text / review-reply templates,
+- Settings has tabs via `?tab=` (page owns PageHeader + PillTabs): `accounts` (connections-board, Data sources), `templates` (`settings/templates-board.tsx`: request email / text / review-reply templates,
   `src/lib/templates.ts` = kinds, merge fields `{{name}} {{full_name}} {{business}} {{link}}`, `mergeTemplate`, `replyFor`, starter set;
   provider `listTemplates/saveTemplate/deleteTemplate`, one default per kind). Reviews uses them: the reply dialog's Templates menu
-  (best match for the rating first) and Request a review (template picker, editable subject/body, "Send email" through Gmail when
-  connected — `createReviewRequest({ viaGmail })` — else mailto/sms/copy). Account rows share `settings/account-grid.tsx`.
+  (best match for the rating first) and Request a review (template picker, editable subject/body; the app sends no email itself:
+  Open email = mailto with the plain review link, Open messages = sms:, or Copy message; `createReviewRequest` only records it). Account rows share `settings/account-grid.tsx`.
 - Facebook Page + Instagram (real when `META_APP_ID/SECRET/LOGIN_CONFIG_ID` are set, demo or live): `src/lib/meta/oauth.ts` — Facebook
   Login for Business with our configuration (`config_id`), callback `src/app/api/oauth/meta/callback` (`META_REDIRECT_URI`), long-lived
   user token + Page tokens (with linked Instagram business accounts) stored encrypted per workspace in the token table
@@ -142,9 +142,8 @@ a content calendar for posts, and a profile audit with in-app fixes.
   Facebook, Instagram, LinkedIn and X (connect → pick locations/Page/account → sync/disconnect). Demo mode simulates OAuth;
   live mode needs each network's app keys (see `.env.example`). `getConnectedChannels()` derives from connections.
 - Users (`src/app/(app)/users`, `src/components/users/users-board.tsx`) — workspace members with roles `admin` (everything,
-  incl. Settings and Users) or `member` (assigned locations only; `locationIds: []` = all). Invite by email → `/invite/[token]` link,
-  emailed through the workspace's connected Gmail (`emailInvites` in actions.ts: "Join workspace" button, `APP_URL` or the request
-  origin; also on Resend); without Gmail or when a send fails the dialog shows the link to copy. Server actions guard: admins only, can't remove yourself or the last admin.
+  incl. Settings and Users) or `member` (assigned locations only; `locationIds: []` = all). Invite by email → `/invite/[token]` link
+  that the admin copies and shares (the app sends no email; resend makes a new link and copies it). Server actions guard: admins only, can't remove yourself or the last admin.
   Roles are NOT enforced on other pages yet — wire `getCurrentMember()` into the provider/pages when real sign-in lands.
 - Ranking (`src/app/(app)/ranking`, `src/components/ranking/`) — Google Search Console only, for every profile (no keyword tracking /
   DataForSEO): `search-console-board.tsx` shows avg position, clicks, impressions, CTR per query, `?range=` with a 2-day data lag via `scRange`

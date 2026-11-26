@@ -1,20 +1,7 @@
-// Brand glyphs: Google, Gmail, Search Console (brand colours are the one exception to theme tokens).
+// Brand glyphs: Google, Search Console (brand colours are the one exception to theme tokens).
 import { GoogleIcon } from "@/components/marketing/channel-icon";
 
 export { GoogleIcon };
-
-export function GmailIcon({ className }: { className?: string }) {
-  return (
-    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
-      <path fill="#4285F4" d="M1.6 20h3.8v-9.2L0 6.8v11.6c0 .9.7 1.6 1.6 1.6Z" />
-      <path fill="#34A853" d="M18.6 20h3.8c.9 0 1.6-.7 1.6-1.6V6.8l-5.4 4Z" />
-      <path fill="#FBBC04" d="M18.6 3.9v6.9l5.4-4V4.6c0-2-2.3-3.1-3.9-1.9Z" />
-      <path fill="#EA4335" d="M5.4 10.8V3.9L12 8.8l6.6-4.9v6.9L12 15.7Z" />
-      <path fill="#C5221F" d="M0 4.6v2.2l5.4 4V3.9L3.9 2.7C2.3 1.5 0 2.6 0 4.6Z" />
-    </svg>
-  );
-}
-
 
 /** Google Search Console glyph (simplified). */
 export function SearchConsoleIcon({ className }: { className?: string }) {

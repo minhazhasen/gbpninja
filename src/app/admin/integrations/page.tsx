@@ -22,7 +22,7 @@ const APPS: Record<AppGroup, { name: string; icon: React.ReactNode; powers: stri
   Google: {
     name: "Google",
     icon: <GoogleIcon className="h-5 w-5" />,
-    powers: "Business Profiles, Gmail and Search Console",
+    powers: "Business Profiles and Search Console",
     console: { label: "Google Cloud Console", href: "https://console.cloud.google.com/apis/credentials" },
   },
   Firebase: {

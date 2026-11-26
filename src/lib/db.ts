@@ -100,5 +100,10 @@ export const db = {
     async delete({ where }: { where: { purpose: string } }) {
       open().prepare('DELETE FROM "GoogleToken" WHERE "purpose" = ?').run(where.purpose);
     },
+    /** Every row whose purpose key ends with `suffix` (keys are "<workspace id>:<purpose>"). */
+    async findManyBySuffix(suffix: string) {
+      const rows = open().prepare('SELECT * FROM "GoogleToken" WHERE "purpose" = ? OR "purpose" LIKE ?').all(suffix, `%:${suffix}`) as Record<string, unknown>[];
+      return rows.map((r) => toRow(r)!);
+    },
   },
 };

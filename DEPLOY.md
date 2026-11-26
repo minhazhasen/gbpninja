@@ -77,7 +77,7 @@ Save → *Restart*. The app creates its database tables on start (`src/instrumen
 - **Schema changes:** edit `prisma/schema.prisma`, run `npm run db:sql` (and `npm run db:push` locally). New tables/indexes are created on the
   next start; changing existing columns needs a manual migration.
 - **Health:** `https://app.gbpninja.com/api/health` shows the app's threads and memory (expect ~9 threads, ~200 MB).
-- **Smoke test:** `https://app.gbpninja.com/privacy` (public) loads, `/dashboard` redirects to `/login`, sign-in works, Settings → connect Gmail.
+- **Smoke test:** `https://app.gbpninja.com/privacy` (public) loads, `/dashboard` redirects to `/login`, sign-in works, Settings → connect Google Business Profile.
 - **Logs:** cPanel → Setup Node.js App → the app's `stderr.log` in the app root.
 
 ## Background jobs and backups

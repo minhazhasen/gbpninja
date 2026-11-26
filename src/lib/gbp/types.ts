@@ -362,14 +362,6 @@ export interface GbpProvider {
   getSearchConsoleReport(locationId: string, range: { from: string; to: string; compare: boolean }): Promise<SearchConsoleReport | null>;
   /** One query's detail (dimensions date / page / device, filtered to the query); null when not connected or no property. */
   getSearchConsoleQuery(locationId: string, query: string, range: { from: string; to: string; compare: boolean }): Promise<SearchConsoleQueryDetail | null>;
-  getEmailSender(): Promise<EmailSender>;
-  /** After Google sign-in with the gmail.send scope (`email` = the signed-in Gmail address). */
-  connectGmail(email?: string | null): Promise<EmailSender>;
-  updateEmailSender(patch: Partial<Pick<EmailSender, "fromName">>): Promise<EmailSender>;
-  disconnectGmail(): Promise<void>;
-  /** Send one email through the connected Gmail account. Throws when not connected or over the daily limit. */
-  /** `body` is the plain-text part; `html`, when given, is sent as the HTML alternative. */
-  sendEmail(message: { to: string; subject: string; body: string; html?: string; fromName?: string | null }): Promise<void>;
   listTemplates(): Promise<MessageTemplate[]>;
   /** Create (id null) or update. Setting isDefault clears it on the other templates of that kind. */
   saveTemplate(id: string | null, input: TemplateInput): Promise<MessageTemplate>;
@@ -564,20 +556,6 @@ export interface Task {
 }
 export type TaskInput = Pick<Task, "title" | "stage" | "priority"> & Partial<Pick<Task, "description" | "assigneeId" | "dueDate" | "locationId" | "parentId" | "order" | "source">>;
 export type TaskPatch = Partial<Pick<Task, "title" | "description" | "stage" | "priority" | "assigneeId" | "dueDate" | "locationId" | "order">>;
-
-/** Gmail account the workspace sends review-request emails from (Gmail API, gmail.send scope). */
-export interface EmailSender {
-  status: "connected" | "not_connected";
-  /** Gmail / Google Workspace address mail is sent from. */
-  email?: string | null;
-  /** Shown as the sender name, e.g. "Sunrise Dental Clinic". Blank = the location's name. */
-  fromName?: string | null;
-  /** Replies go here instead of the Gmail address. */
-  connectedAt?: string | null;
-  sentToday: number;
-  /** Gmail's daily sending limit for the account (500 personal, 2,000 Google Workspace). */
-  dailyLimit: number;
-}
 
 /** Reusable messages: review-request email / text, and public review replies. */
 export type TemplateKind = "request_email" | "request_sms" | "reply";

@@ -4,20 +4,18 @@
 // (ReviewReplyDialog, ReviewFollowUpDialog, RequestReviewDialog).
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import { toast } from "sonner";
-import { ChevronUp, ClipboardCheck, Copy, FileText, Info, Loader2, Mail, MessageSquare, Pencil, Phone, Plus, Send, Star } from "lucide-react";
+import { ChevronUp, ClipboardCheck, Copy, FileText, Info, Loader2, Mail, MessageSquare, Phone, Plus, Star } from "lucide-react";
 import { buttonClass, inputClass } from "@/components/ui";
 import { Menu, Modal, Segmented, SelectBox } from "@/components/ui-client";
 import { GoogleIcon } from "@/components/marketing/channel-icon";
 import { ReviewAvatar, ReviewStars } from "@/components/reviews/review-bits";
 import { createReviewRequest, updateReview } from "@/app/(app)/actions";
-import type { EmailSender, FollowUpType, MessageTemplate, Review, ReviewRequestMethod, TeamMember } from "@/lib/gbp/types";
+import type { FollowUpType, MessageTemplate, Review, ReviewRequestMethod, TeamMember } from "@/lib/gbp/types";
 import { FOLLOW_UP_LABEL, isLow, reviewLink, reviewState } from "@/lib/reviews";
-import { LINK_TOKEN, REVIEW_BUTTON_LABEL, mergeTemplate, replyFor, splitOnLink, templateOrder } from "@/lib/templates";
-import { GmailIcon } from "@/components/brand-icons";
+import { mergeTemplate, replyFor, templateOrder } from "@/lib/templates";
 import { cn } from "@/lib/utils";
 
 export type ReviewRow = Review & { locationTitle: string };
@@ -268,15 +266,13 @@ export function ReviewDialog({
   );
 }
 
-/** Ask a customer for a Google review: pick a template, edit it, then send from Gmail (or the device's mail / messages app). */
+/** Ask a customer for a Google review: pick a template, edit it, then send it from the device's mail / messages app (or copy it). */
 export function RequestReviewDialog({
   open,
   onClose,
   locations,
   defaultLocationId,
   templates,
-  sender,
-  settingsHref,
 }: {
   open: boolean;
   onClose: () => void;
@@ -284,9 +280,6 @@ export function RequestReviewDialog({
   defaultLocationId: string;
   /** Request email / text templates (Settings → Templates). */
   templates: MessageTemplate[];
-  sender: EmailSender;
-  /** Settings → Email, to connect Gmail. */
-  settingsHref: string;
 }) {
   const router = useRouter();
   const [locationId, setLocationId] = useState(defaultLocationId);
@@ -298,9 +291,7 @@ export function RequestReviewDialog({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [edited, setEdited] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const gmail = sender.status === "connected";
   const kind = method === "email" ? "request_email" : "request_sms";
   const options = useMemo(() => templates.filter((t) => t.kind === kind).sort(templateOrder), [templates, kind]);
 
@@ -312,7 +303,6 @@ export function RequestReviewDialog({
     setEmail("");
     setPhone("");
     setEdited(false);
-    setEditing(false);
   }, [open, defaultLocationId]);
   // Switching between email and text picks that kind's default template.
   useEffect(() => {
@@ -326,28 +316,23 @@ export function RequestReviewDialog({
   // Until the message is edited by hand it follows the template, name and location.
   useEffect(() => {
     if (edited || !tpl) return;
-    // Emails keep {{link}}: it is sent as a "Leave a Google review" button, not a bare URL.
-    const vars = { name, business: (method === "email" && sender.fromName) || loc?.title, link: method === "email" ? LINK_TOKEN : link };
+    // The message goes out from the user's own mail / messages app, so the review link is the plain URL.
+    const vars = { name, business: loc?.title, link };
     setSubject(mergeTemplate(tpl.subject ?? "", vars));
     setBody(mergeTemplate(tpl.body, vars));
-  }, [tpl, name, loc?.title, link, edited, method, sender.fromName]);
+  }, [tpl, name, loc?.title, link, edited]);
 
-  const direct = method === "email" && gmail;
   const save = async (status: "draft" | "sent") => {
     setBusy(status);
-    const res = await createReviewRequest({ locationId, name, email, phone, method, status, viaGmail: status === "sent" && direct, subject, body });
+    const res = await createReviewRequest({ locationId, name, email, phone, method, status });
     setBusy(null);
     if (!res.ok) return void toast.error(res.error);
     if (status === "sent") {
-      if (direct) toast.success(`Review request sent to ${email}`, { description: `From ${sender.email}` });
-      else {
-        // No Gmail / SMS provider: hand off to the device's own apps, or copy the message.
-        // mailto can't carry a button, so the mail app gets the plain link.
-        if (method === "email") window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(splitOnLink(body).join(link))}`;
-        else if (method === "sms") window.location.href = `sms:${phone.replace(/[^\d+]/g, "")}?&body=${encodeURIComponent(body)}`;
-        else await navigator.clipboard.writeText(body).catch(() => undefined);
-        toast.success(method === "link" ? "Message copied — paste it to your customer" : "Request saved — finish sending in your mail or messages app");
-      }
+      // Hand off to the device's own apps, or copy the message.
+      if (method === "email") window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      else if (method === "sms") window.location.href = `sms:${phone.replace(/[^\d+]/g, "")}?&body=${encodeURIComponent(body)}`;
+      else await navigator.clipboard.writeText(body).catch(() => undefined);
+      toast.success(method === "link" ? "Message copied — paste it to your customer" : "Request saved — finish sending in your mail or messages app");
     } else toast.success("Saved as draft");
     router.refresh();
     onClose();
@@ -405,22 +390,10 @@ export function RequestReviewDialog({
           <div className="space-y-1.5">
             <Label htmlFor="ask-email">Email</Label>
             <input id="ask-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputClass} placeholder="jane@example.com" />
-            {gmail ? (
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <GmailIcon className="h-3.5 w-3.5" /> Sends from <span className="font-medium text-foreground">{sender.email}</span>
-              </p>
-            ) : (
-              <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                <span>
-                  Opens your mail app.{" "}
-                  <Link href={settingsHref} className="font-semibold text-primary hover:underline">
-                    Connect Gmail
-                  </Link>{" "}
-                  to send from here.
-                </span>
-              </p>
-            )}
+            <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>Opens your mail app with the message ready to send.</span>
+            </p>
           </div>
         )}
         {method === "sms" && (
@@ -449,44 +422,20 @@ export function RequestReviewDialog({
           {method === "email" && (
             <input value={subject} onChange={(e) => (setSubject(e.target.value), setEdited(true))} aria-label="Subject" placeholder="Subject" className={cn(inputClass, "font-medium")} />
           )}
-          {method === "email" && !editing ? (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="group relative block w-full rounded-lg border bg-card px-3 py-2.5 text-left text-sm leading-relaxed hover:border-primary/40"
-              aria-label="Edit message"
-            >
-              <span className="block whitespace-pre-wrap break-words">
-                {splitOnLink(body).map((part, i, all) => (
-                  <span key={i}>
-                    {part}
-                    {i < all.length - 1 && <span className="my-1 inline-block rounded-full bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground">{REVIEW_BUTTON_LABEL}</span>}
-                  </span>
-                ))}
-              </span>
-              <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-md border bg-card px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                <Pencil className="h-3 w-3" /> Edit
-              </span>
-            </button>
-          ) : (
-            <textarea
-              value={body}
-              onChange={(e) => (setBody(e.target.value), setEdited(true))}
-              aria-label="Message"
-              rows={method === "email" ? 8 : 4}
-              className={cn(inputClass, "resize-y leading-relaxed")}
-              autoFocus={method === "email"}
-            />
-          )}
+          <textarea
+            value={body}
+            onChange={(e) => (setBody(e.target.value), setEdited(true))}
+            aria-label="Message"
+            rows={method === "email" ? 8 : 4}
+            className={cn(inputClass, "resize-y leading-relaxed")}
+          />
           <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
             {edited ? (
               <button type="button" className="font-semibold text-primary hover:underline" onClick={() => setEdited(false)}>
                 Reset to template
               </button>
             ) : (
-              <span>
-                {method === "email" ? (editing ? `${LINK_TOKEN} becomes the "${REVIEW_BUTTON_LABEL}" button.` : "Click the message to edit it.") : "Name and review link fill in automatically."}
-              </span>
+              <span>Name and review link fill in automatically.</span>
             )}
             {method !== "email" && (
               <span className="tabular-nums">
@@ -502,8 +451,8 @@ export function RequestReviewDialog({
           Save draft
         </button>
         <button type="button" className={buttonClass()} disabled={!!busy} onClick={() => save("sent")}>
-          {busy === "sent" ? <Loader2 className="animate-spin" /> : direct ? <Send /> : method === "link" ? <Copy /> : <MessageSquare />}
-          {direct ? "Send email" : method === "email" ? "Open email" : method === "sms" ? "Open messages" : "Copy message"}
+          {busy === "sent" ? <Loader2 className="animate-spin" /> : method === "link" ? <Copy /> : method === "email" ? <Mail /> : <MessageSquare />}
+          {method === "email" ? "Open email" : method === "sms" ? "Open messages" : "Copy message"}
         </button>
       </div>
     </Modal>

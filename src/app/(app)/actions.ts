@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getProvider } from "@/lib/gbp";
@@ -29,9 +29,6 @@ import {
   trackOffer as trackOfferEvent,
   updateLead,
 } from "@/lib/platform/store";
-import { APP_NAME } from "@/components/brand";
-import { LINK_TOKEN, SAMPLE_VARS, emailHtml, mergeTemplate, splitOnLink, templateOrder } from "@/lib/templates";
-import { reviewLink } from "@/lib/reviews";
 import { CHANNELS, CONNECT_LABEL, LOCKED, MOVABLE, validatePost, type Channel, type PostDraft, type WhenMode } from "@/lib/posts";
 import {
   DAYS,
@@ -80,10 +77,6 @@ const requestSchema = z
     phone: z.string().trim().max(40).nullish(),
     method: z.enum(["email", "sms", "link"]),
     status: z.enum(["draft", "sent"]),
-    /** Email sent through the connected Gmail (otherwise the device's mail app is opened). */
-    viaGmail: z.boolean().optional(),
-    subject: z.string().trim().max(300).optional(),
-    body: z.string().trim().max(10_000).optional(),
   })
   .refine((r) => r.method !== "email" || !!r.email, { message: "Add an email address", path: ["email"] })
   .refine((r) => r.method !== "sms" || !!r.phone, { message: "Add a phone number", path: ["phone"] });
@@ -92,16 +85,9 @@ export async function createReviewRequest(input: z.input<typeof requestSchema>):
   try {
     const r = requestSchema.safeParse(input);
     if (!r.success) return { ok: false, error: r.error.issues[0]?.message ?? "Check the form" };
-    const { viaGmail, subject, body, ...request } = r.data;
+    // The message itself is sent from the user's own mail / messages app (or copied); we only record the request.
+    const request = r.data;
     const provider = await getProvider();
-    if (viaGmail && request.status === "sent" && request.method === "email") {
-      if (!subject || !body) return { ok: false, error: "Add a subject and a message" };
-      const sender = await provider.getEmailSender();
-      const location = await provider.getLocation(request.locationId);
-      // The body keeps {{link}}: a button in the HTML part, the plain URL in the text part.
-      const link = reviewLink(location?.placeId);
-      await provider.sendEmail({ to: request.email!, subject, body: splitOnLink(body).join(link ?? ""), html: emailHtml(body, link), fromName: sender.fromName || location?.title });
-    }
     const saved = await provider.createReviewRequest({ ...request, email: request.email || null, phone: request.phone || null });
     revalidatePath("/reviews");
     revalidatePath("/settings");
@@ -606,54 +592,15 @@ async function locationAccess(allLocations: boolean | undefined, ids: string[] |
   return picked.length === all.length ? [] : picked; // every location picked = all
 }
 
-/** The app's address for links in emails: APP_URL, else the address this request came in on. */
-async function siteOrigin() {
-  if (process.env.APP_URL) return process.env.APP_URL.replace(/\/$/, "");
-  const h = await headers();
-  const host = h.get("x-forwarded-host") ?? h.get("host") ?? "localhost:3001";
-  return `${h.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https")}://${host}`;
-}
-
-type InviteSend = { email: string; token: string; emailed: boolean; error?: string };
-
-/** Emails each invite through the workspace's connected Gmail. Without Gmail (or when a send fails) the link is shared by hand. */
-async function emailInvites(provider: Awaited<ReturnType<typeof getProvider>>, inviter: { name: string; email: string }, invites: { email: string; token: string }[]): Promise<InviteSend[]> {
-  const sender = await provider.getEmailSender();
-  if (sender.status !== "connected") return invites.map((i) => ({ ...i, emailed: false }));
-  const locations = await provider.listLocations().catch(() => []);
-  const workspace = locations.length === 1 ? locations[0].title : locations.length ? `${locations[0].title} and ${locations.length - 1} more` : "their workspace";
-  const who = inviter.name || inviter.email;
-  const origin = await siteOrigin();
-  const out: InviteSend[] = [];
-  for (const i of invites) {
-    const link = `${origin}/invite/${i.token}`;
-    const text = (l: string) =>
-      `Hi,\n\n${who} invited you to join ${workspace} on ${APP_NAME}, where the team manages its Google Business Profiles: reviews, posts, performance and the profile audit.\n\n${l}\n\nSign in with this email address (${i.email}) to accept. The link works once.`;
-    try {
-      await provider.sendEmail({
-        to: i.email,
-        subject: `${who} invited you to ${APP_NAME}`,
-        body: text(`Join the workspace: ${link}`),
-        html: emailHtml(text(LINK_TOKEN), link, "Join workspace"),
-        fromName: `${who} via ${APP_NAME}`,
-      });
-      out.push({ ...i, emailed: true });
-    } catch (e) {
-      out.push({ ...i, emailed: false, error: e instanceof Error ? e.message : "Couldn't send the email" });
-    }
-  }
-  return out;
-}
-
 export async function inviteMember(input: {
   emails: string;
   name?: string;
   role: "admin" | "member";
   locationIds: string[];
   allLocations: boolean;
-}): Promise<ActionResult & { links?: InviteSend[] }> {
+}): Promise<ActionResult & { links?: { email: string; token: string }[] }> {
   try {
-    const { provider, me } = await asAdmin();
+    const { provider } = await asAdmin();
     const emails = [
       ...new Set(
         input.emails
@@ -674,9 +621,9 @@ export async function inviteMember(input: {
       const m = await provider.inviteMember({ email, name, role, locationIds });
       links.push({ email, token: m.inviteToken ?? "" });
     }
-    const sent = await emailInvites(provider, me, links);
+    // Invites are shared as links (the dialog shows them to copy); the app doesn't send email itself.
     revalidatePath("/users");
-    return { ok: true, id: links[0].email, links: sent };
+    return { ok: true, id: links[0].email, links };
   } catch (e) {
     return fail(e);
   }
@@ -720,13 +667,12 @@ export async function removeMember(id: string): Promise<ActionResult> {
   }
 }
 
-export async function resendInvite(id: string): Promise<ActionResult & { token?: string; emailed?: boolean; emailError?: string }> {
+export async function resendInvite(id: string): Promise<ActionResult & { token?: string }> {
   try {
-    const { provider, me } = await asAdmin();
+    const { provider } = await asAdmin();
     const m = await provider.resendInvite(z.string().min(1).parse(id));
-    const [sent] = m.inviteToken ? await emailInvites(provider, me, [{ email: m.email, token: m.inviteToken }]) : [];
     revalidatePath("/users");
-    return { ok: true, id, token: m.inviteToken ?? undefined, emailed: !!sent?.emailed, emailError: sent?.error };
+    return { ok: true, id, token: m.inviteToken ?? undefined };
   } catch (e) {
     return fail(e);
   }
@@ -949,65 +895,7 @@ export async function deleteTask(id: string): Promise<ActionResult> {
   }
 }
 
-// ---------------------------------------------------------------- email (Gmail) + message templates — workspace admins
-export async function connectGmail(): Promise<ActionResult & { redirect?: string }> {
-  try {
-    const { provider } = await asAdmin();
-    if (googleOAuthConfigured()) return { ok: true, id: "gmail", redirect: await googleAuthUrl("gmail", "/settings?tab=email") };
-    if (!channelAvailable("google")) return { ok: false, error: "Google sign-in isn't set up yet" };
-    await provider.connectGmail();
-    revalidatePath("/settings");
-    return { ok: true, id: "gmail" };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-export async function disconnectGmail(): Promise<ActionResult> {
-  try {
-    const { provider } = await asAdmin();
-    await provider.disconnectGmail();
-    revalidatePath("/settings");
-    return { ok: true, id: "gmail" };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-export async function updateEmailSender(input: { fromName?: string }): Promise<ActionResult> {
-  try {
-    const { provider } = await asAdmin();
-    const r = z
-      .object({
-        fromName: z.string().trim().max(80, "Keep the sender name under 80 characters"),
-      })
-      .safeParse({ fromName: input.fromName ?? "" });
-    if (!r.success) return { ok: false, error: r.error.issues[0]?.message ?? "Check the form" };
-    await provider.updateEmailSender({ fromName: r.data.fromName || null });
-    revalidatePath("/settings");
-    return { ok: true, id: "gmail" };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-/** Sends the default request email (sample data) to the connected Gmail address itself. */
-export async function sendTestEmail(): Promise<ActionResult & { to?: string }> {
-  try {
-    const { provider } = await asAdmin();
-    const sender = await provider.getEmailSender();
-    if (sender.status !== "connected" || !sender.email) return { ok: false, error: "Connect Gmail first" };
-    const tpl = (await provider.listTemplates()).filter((t) => t.kind === "request_email").sort(templateOrder)[0];
-    const subject = mergeTemplate(tpl?.subject ?? "Test email", SAMPLE_VARS);
-    const body = mergeTemplate(tpl?.body ?? "This is a test.", { ...SAMPLE_VARS, link: LINK_TOKEN });
-    await provider.sendEmail({ to: sender.email, subject: `[Test] ${subject}`, body: splitOnLink(body).join(SAMPLE_VARS.link!), html: emailHtml(body, SAMPLE_VARS.link!), fromName: sender.fromName });
-    revalidatePath("/settings");
-    return { ok: true, id: "test", to: sender.email };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
+// ---------------------------------------------------------------- message templates — workspace admins
 const templateSchema = z.object({
   kind: z.enum(["request_email", "request_sms", "reply"]),
   name: z.string().trim().min(1, "Name the template").max(80, "Keep the name under 80 characters"),

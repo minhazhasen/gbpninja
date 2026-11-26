@@ -16,7 +16,7 @@ export default function PrivacyPage() {
         <ul>
           <li>We only use your data to run the features you use in {product}.</li>
           <li>We never sell your data, and we never use Google user data for advertising.</li>
-          <li>We don&apos;t read your Gmail inbox. With Gmail connected we can only send the emails you ask us to send.</li>
+          <li>We don&apos;t access your Gmail. Review requests open in your own mail or messages app.</li>
           <li>You can disconnect Google at any time, and delete your account and data.</li>
         </ul>
       </Section>
@@ -32,11 +32,7 @@ export default function PrivacyPage() {
           direction requests.
         </p>
         <p>
-          <strong>Gmail</strong> (only if you connect it, with the <code>gmail.send</code> permission): the email address of the connected account. This permission lets {product} send email from your
-          account; it does not let us read, search or delete your email.
-        </p>
-        <p>
-          <strong>Google Search Console data</strong> (only if you connect it, read-only): search queries, clicks, impressions and positions for the website properties you choose.
+          <strong>Google Search Console data</strong> (only if you connect it, with the read-only <code>webmasters.readonly</code> permission): search queries, clicks, impressions and positions for the website properties you choose.
         </p>
         <p>
           <strong>Information you enter</strong>, such as message templates, review requests (customer name, email or phone number you provide), tasks, notes, posts you draft, and competitors you add.
@@ -53,9 +49,6 @@ export default function PrivacyPage() {
           <li>
             <strong>Business Profile:</strong> show your profiles&apos; performance, reviews and posts; post replies and updates you write or approve; publish posts you schedule; and run the profile
             audit.
-          </li>
-          <li>
-            <strong>Gmail:</strong> send review request emails and test emails that you create and send from {product}, from your own address.
           </li>
           <li>
             <strong>Search Console:</strong> show the searches your website appears for on the Ranking page.
@@ -89,7 +82,7 @@ export default function PrivacyPage() {
         <ul>
           <li>
             <strong>With service providers</strong> that run the service for us under confidentiality obligations: Google Cloud and Firebase (authentication), our hosting and database providers, and
-            Google&apos;s own APIs when you act on your profiles or send email.
+            Google&apos;s own APIs when you act on your profiles.
           </li>
           <li>
             <strong>With your team:</strong> people you invite to your workspace can see the profiles and data you give them access to.

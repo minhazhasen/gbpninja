@@ -1,5 +1,4 @@
 import { ConnectionsBoard } from "@/components/settings/connections-board";
-import { EmailSettings } from "@/components/settings/email-settings";
 import { TemplatesBoard } from "@/components/settings/templates-board";
 import { PageHeader, PillTabs } from "@/components/ui";
 import { channelAvailable, isDemo } from "@/lib/connections";
@@ -12,7 +11,6 @@ export const metadata = { title: "Settings" };
 
 const TABS = [
   { key: "accounts", label: "Accounts", intro: "Connect your accounts and configure the workspace" },
-  { key: "email", label: "Email", intro: "Send review requests from your own Gmail address" },
   { key: "templates", label: "Templates", intro: "Review request emails, texts and reply templates" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
@@ -29,12 +27,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const demo = isDemo();
 
   let body: React.ReactNode;
-  if (tab === "email") {
-    const sender = await provider.getEmailSender();
-    body = (
-      <EmailSettings sender={sender} businessName={location?.title ?? "your business"} available={channelAvailable("google")} demo={demo} templatesHref={here("/settings", { tab: "templates" })} />
-    );
-  } else if (tab === "templates") {
+  if (tab === "templates") {
     const templates = await provider.listTemplates();
     body = <TemplatesBoard templates={templates} businessName={location?.title ?? "your business"} initialKind={isTemplateKind(sp.kind) ? sp.kind : "request_email"} />;
   } else {

@@ -1,5 +1,5 @@
 // "/" — the Google OAuth redirect URI registered on the OAuth client (GOOGLE_REDIRECT_URI). Google's callback (?code&state)
-// finishes connecting Gmail / Business Profile and returns to Settings; any other visit goes to the dashboard.
+// finishes connecting Business Profile / Search Console and returns to Settings; any other visit goes to the dashboard.
 import { NextResponse, type NextRequest } from "next/server";
 import { publicUrl } from "@/lib/public-url";
 import { finishGoogleAuth, isOAuthCallback } from "@/lib/google/oauth";
@@ -19,7 +19,6 @@ export async function GET(req: NextRequest) {
   else {
     // Mark the account connected; Business Profile then asks which locations to manage.
     if (r.purpose === "gbp") await (await getProvider()).connectChannel("google", r.email ?? null);
-    if (r.purpose === "gmail") await (await getProvider()).connectGmail(r.email ?? null);
     if (r.purpose === "searchconsole") await (await getProvider()).connectSearchConsole(r.email ?? null);
     back.searchParams.set("connected", r.purpose === "gbp" ? "google" : (r.purpose ?? "google"));
   }

@@ -9,7 +9,7 @@ export const LEGAL = {
   /** The company that runs GBPNinja (shown on both pages; the Google OAuth app is registered under it). */
   operator: "Axilweb Ltd",
   operatorSite: "https://www.axilweb.com",
-  effective: "November 20, 2026",
+  effective: "November 26, 2026",
 };
 
 export function LegalHeader({ title, intro }: { title: string; intro: string }) {
