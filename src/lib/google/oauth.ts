@@ -56,7 +56,10 @@ export async function googleAuthUrl(purpose: GooglePurpose, returnTo: string) {
     access_type: "offline",
     // consent: always return a refresh token, even when the account approved this app before.
     prompt: "consent select_account",
-    include_granted_scopes: "true",
+    // Ask only for this purpose's scopes. With include_granted_scopes=true Google also re-requests anything the account
+    // approved before (e.g. gmail.send from before Gmail was removed), which brings back the "unverified app" warning.
+    // Each purpose has its own token anyway (tokenKey), so nothing relies on combined grants.
+    include_granted_scopes: "false",
     state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${p}`;
