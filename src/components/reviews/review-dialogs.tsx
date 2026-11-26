@@ -1,20 +1,20 @@
 "use client";
 
-// Review reply / handling dialog and "Request reviews" dialog, ported from TasksBook CRM
-// (ReviewReplyDialog, ReviewFollowUpDialog, RequestReviewDialog).
+// Review reply / handling dialog, ported from TasksBook CRM
+// (ReviewReplyDialog, ReviewFollowUpDialog).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { format, parseISO } from "date-fns";
 import { toast } from "sonner";
-import { ChevronUp, ClipboardCheck, Copy, FileText, Info, Loader2, Mail, MessageSquare, Phone, Plus, Star } from "lucide-react";
+import { ChevronUp, ClipboardCheck, FileText, Loader2, Plus, Star } from "lucide-react";
 import { buttonClass, inputClass } from "@/components/ui";
 import { Menu, Modal, Segmented, SelectBox } from "@/components/ui-client";
 import { GoogleIcon } from "@/components/marketing/channel-icon";
 import { ReviewAvatar, ReviewStars } from "@/components/reviews/review-bits";
-import { createReviewRequest, updateReview } from "@/app/(app)/actions";
-import type { FollowUpType, MessageTemplate, Review, ReviewRequestMethod, TeamMember } from "@/lib/gbp/types";
-import { FOLLOW_UP_LABEL, isLow, reviewLink, reviewState } from "@/lib/reviews";
+import { updateReview } from "@/app/(app)/actions";
+import type { FollowUpType, MessageTemplate, Review, TeamMember } from "@/lib/gbp/types";
+import { FOLLOW_UP_LABEL, isLow, reviewState } from "@/lib/reviews";
 import { mergeTemplate, replyFor, templateOrder } from "@/lib/templates";
 import { cn } from "@/lib/utils";
 
@@ -266,195 +266,3 @@ export function ReviewDialog({
   );
 }
 
-/** Ask a customer for a Google review: pick a template, edit it, then send it from the device's mail / messages app (or copy it). */
-export function RequestReviewDialog({
-  open,
-  onClose,
-  locations,
-  defaultLocationId,
-  templates,
-}: {
-  open: boolean;
-  onClose: () => void;
-  locations: { id: string; title: string; placeId?: string }[];
-  defaultLocationId: string;
-  /** Request email / text templates (Settings → Templates). */
-  templates: MessageTemplate[];
-}) {
-  const router = useRouter();
-  const [locationId, setLocationId] = useState(defaultLocationId);
-  const [method, setMethod] = useState<ReviewRequestMethod>("email");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [templateId, setTemplateId] = useState("");
-  const [subject, setSubject] = useState("");
-  const [body, setBody] = useState("");
-  const [edited, setEdited] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const kind = method === "email" ? "request_email" : "request_sms";
-  const options = useMemo(() => templates.filter((t) => t.kind === kind).sort(templateOrder), [templates, kind]);
-
-  useEffect(() => {
-    if (!open) return;
-    setLocationId(defaultLocationId);
-    setMethod("email");
-    setName("");
-    setEmail("");
-    setPhone("");
-    setEdited(false);
-  }, [open, defaultLocationId]);
-  // Switching between email and text picks that kind's default template.
-  useEffect(() => {
-    setTemplateId(options[0]?.id ?? "");
-    setEdited(false);
-  }, [options]);
-
-  const loc = locations.find((l) => l.id === locationId) ?? locations[0];
-  const link = reviewLink(loc?.placeId) ?? "";
-  const tpl = options.find((t) => t.id === templateId) ?? options[0];
-  // Until the message is edited by hand it follows the template, name and location.
-  useEffect(() => {
-    if (edited || !tpl) return;
-    // The message goes out from the user's own mail / messages app, so the review link is the plain URL.
-    const vars = { name, business: loc?.title, link };
-    setSubject(mergeTemplate(tpl.subject ?? "", vars));
-    setBody(mergeTemplate(tpl.body, vars));
-  }, [tpl, name, loc?.title, link, edited]);
-
-  const save = async (status: "draft" | "sent") => {
-    setBusy(status);
-    const res = await createReviewRequest({ locationId, name, email, phone, method, status });
-    setBusy(null);
-    if (!res.ok) return void toast.error(res.error);
-    if (status === "sent") {
-      // Hand off to the device's own apps, or copy the message.
-      if (method === "email") window.location.href = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      else if (method === "sms") window.location.href = `sms:${phone.replace(/[^\d+]/g, "")}?&body=${encodeURIComponent(body)}`;
-      else await navigator.clipboard.writeText(body).catch(() => undefined);
-      toast.success(method === "link" ? "Message copied — paste it to your customer" : "Request saved — finish sending in your mail or messages app");
-    } else toast.success("Saved as draft");
-    router.refresh();
-    onClose();
-  };
-
-  const smsLen = body.length;
-  return (
-    <Modal open={open} onClose={onClose} labelledBy="ask-title" className="h-[100dvh] max-w-lg sm:h-auto sm:max-h-[92dvh]" title={<span id="ask-title">Request a review</span>}>
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
-        {locations.length > 1 && (
-          <div className="space-y-1.5">
-            <Label>Location</Label>
-            <SelectBox label="Location" value={locationId} onChange={setLocationId} options={locations.map((l) => ({ value: l.id, label: l.title }))} />
-          </div>
-        )}
-        <div className="space-y-1.5">
-          <Label htmlFor="ask-name">Customer name</Label>
-          <input id="ask-name" value={name} onChange={(e) => setName(e.target.value)} className={inputClass} placeholder="Jane Smith" autoFocus />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Send by</Label>
-          <Segmented
-            label="Send by"
-            value={method}
-            onChange={setMethod}
-            options={[
-              {
-                value: "email",
-                label: (
-                  <>
-                    <Mail className="h-3.5 w-3.5" /> Email
-                  </>
-                ),
-              },
-              {
-                value: "sms",
-                label: (
-                  <>
-                    <Phone className="h-3.5 w-3.5" /> Text
-                  </>
-                ),
-              },
-              {
-                value: "link",
-                label: (
-                  <>
-                    <Copy className="h-3.5 w-3.5" /> Copy link
-                  </>
-                ),
-              },
-            ]}
-          />
-        </div>
-        {method === "email" && (
-          <div className="space-y-1.5">
-            <Label htmlFor="ask-email">Email</Label>
-            <input id="ask-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputClass} placeholder="jane@example.com" />
-            <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>Opens your mail app with the message ready to send.</span>
-            </p>
-          </div>
-        )}
-        {method === "sms" && (
-          <div className="space-y-1.5">
-            <Label htmlFor="ask-phone">Mobile number</Label>
-            <input id="ask-phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} className={inputClass} placeholder="+1 512 555 0100" />
-          </div>
-        )}
-
-        <div className="space-y-2 rounded-xl border p-3">
-          <div className="flex items-center gap-2">
-            <Label>Message</Label>
-            {options.length > 1 && (
-              <SelectBox
-                label="Template"
-                value={tpl?.id ?? ""}
-                onChange={(v) => {
-                  setTemplateId(v);
-                  setEdited(false);
-                }}
-                options={options.map((t) => ({ value: t.id, label: `${t.name}${t.isDefault ? " (default)" : ""}` }))}
-                className="ml-auto w-48 [&_select]:h-8 [&_select]:text-xs"
-              />
-            )}
-          </div>
-          {method === "email" && (
-            <input value={subject} onChange={(e) => (setSubject(e.target.value), setEdited(true))} aria-label="Subject" placeholder="Subject" className={cn(inputClass, "font-medium")} />
-          )}
-          <textarea
-            value={body}
-            onChange={(e) => (setBody(e.target.value), setEdited(true))}
-            aria-label="Message"
-            rows={method === "email" ? 8 : 4}
-            className={cn(inputClass, "resize-y leading-relaxed")}
-          />
-          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-            {edited ? (
-              <button type="button" className="font-semibold text-primary hover:underline" onClick={() => setEdited(false)}>
-                Reset to template
-              </button>
-            ) : (
-              <span>Name and review link fill in automatically.</span>
-            )}
-            {method !== "email" && (
-              <span className="tabular-nums">
-                {smsLen} chars · {Math.max(1, Math.ceil(smsLen / 160))} SMS
-              </span>
-            )}
-          </div>
-          {!link && <p className="text-xs text-warning">This location has no Google place id yet, so the message has no review link.</p>}
-        </div>
-      </div>
-      <div className="flex items-center justify-end gap-2 border-t px-5 py-3">
-        <button type="button" className={buttonClass("outline")} disabled={!!busy} onClick={() => save("draft")}>
-          Save draft
-        </button>
-        <button type="button" className={buttonClass()} disabled={!!busy} onClick={() => save("sent")}>
-          {busy === "sent" ? <Loader2 className="animate-spin" /> : method === "link" ? <Copy /> : method === "email" ? <Mail /> : <MessageSquare />}
-          {method === "email" ? "Open email" : method === "sms" ? "Open messages" : "Copy message"}
-        </button>
-      </div>
-    </Modal>
-  );
-}

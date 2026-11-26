@@ -1,9 +1,8 @@
-// Message templates (review-request email / text, review replies): kinds, merge fields and the starter set.
+// Message templates: review replies (the only kind shown since review requests were removed). The request_email / request_sms
+// kinds stay in the type so templates saved earlier still load; they are no longer listed or editable.
 import type { MessageTemplate, StarRating, TemplateKind } from "@/lib/gbp/types";
 
 export const TEMPLATE_KINDS: { key: TemplateKind; label: string; short: string; hint: string }[] = [
-  { key: "request_email", label: "Review request emails", short: "Request emails", hint: "Opened in your mail app when you ask a customer for a review." },
-  { key: "request_sms", label: "Review request texts", short: "Request texts", hint: "Opened in your phone's messages app. Keep it short." },
   { key: "reply", label: "Review replies", short: "Review replies", hint: "Public replies on Google. Suggested by star rating in the review dialog." },
 ];
 export const kindInfo = (k: TemplateKind) => TEMPLATE_KINDS.find((t) => t.key === k) ?? TEMPLATE_KINDS[0];

@@ -11,7 +11,7 @@ export const metadata = { title: "Settings" };
 
 const TABS = [
   { key: "accounts", label: "Accounts", intro: "Connect your accounts and configure the workspace" },
-  { key: "templates", label: "Templates", intro: "Review request emails, texts and reply templates" },
+  { key: "templates", label: "Templates", intro: "Reply templates for your reviews" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
@@ -29,7 +29,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   let body: React.ReactNode;
   if (tab === "templates") {
     const templates = await provider.listTemplates();
-    body = <TemplatesBoard templates={templates} businessName={location?.title ?? "your business"} initialKind={isTemplateKind(sp.kind) ? sp.kind : "request_email"} />;
+    body = <TemplatesBoard templates={templates} businessName={location?.title ?? "your business"} initialKind={isTemplateKind(sp.kind) ? sp.kind : "reply"} />;
   } else {
     const [connections, locations, searchConsole] = await Promise.all([provider.listConnections(), provider.listLocations(), provider.getSearchConsole()]);
     body = (

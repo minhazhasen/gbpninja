@@ -12,7 +12,7 @@ import { channelAvailable } from "@/lib/connections";
 import { googleAuthUrl, googleOAuthConfigured } from "@/lib/google/oauth";
 import { metaAuthUrl, metaConfigured } from "@/lib/meta/oauth";
 import { linkedinAuthUrl, linkedinConfigured } from "@/lib/linkedin/oauth";
-import type { BusinessCategory, ConnectionOption, ReviewPatch, ReviewRequestStatus, SearchConsoleProperty, StarRating, Task } from "@/lib/gbp/types";
+import type { BusinessCategory, ConnectionOption, ReviewPatch, SearchConsoleProperty, StarRating, Task } from "@/lib/gbp/types";
 import { auditLocation } from "@/lib/audit";
 import { isMapsUrl, resolveMapsLink, type MapsLinkInfo } from "@/lib/maps-link";
 import { distanceKm as distance, lookupCoords, scrapeMapsLink, type ScrapedPlace } from "@/lib/maps-scrape";
@@ -64,46 +64,6 @@ export async function updateReview(locationId: string, reviewId: string, patch: 
     await (await getProvider()).updateReview(z.string().min(1).parse(locationId), z.string().min(1).parse(reviewId), p);
     revalidatePath("/", "layout");
     return { ok: true, id: reviewId };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-const requestSchema = z
-  .object({
-    locationId: z.string().min(1),
-    name: z.string().trim().min(1, "Add the customer's name").max(200),
-    email: z.string().trim().email("Enter a valid email").or(z.literal("")).nullish(),
-    phone: z.string().trim().max(40).nullish(),
-    method: z.enum(["email", "sms", "link"]),
-    status: z.enum(["draft", "sent"]),
-  })
-  .refine((r) => r.method !== "email" || !!r.email, { message: "Add an email address", path: ["email"] })
-  .refine((r) => r.method !== "sms" || !!r.phone, { message: "Add a phone number", path: ["phone"] });
-
-export async function createReviewRequest(input: z.input<typeof requestSchema>): Promise<ActionResult> {
-  try {
-    const r = requestSchema.safeParse(input);
-    if (!r.success) return { ok: false, error: r.error.issues[0]?.message ?? "Check the form" };
-    // The message itself is sent from the user's own mail / messages app (or copied); we only record the request.
-    const request = r.data;
-    const provider = await getProvider();
-    const saved = await provider.createReviewRequest({ ...request, email: request.email || null, phone: request.phone || null });
-    revalidatePath("/reviews");
-    revalidatePath("/settings");
-    return { ok: true, id: saved.id };
-  } catch (e) {
-    return fail(e);
-  }
-}
-
-export async function updateReviewRequest(id: string, status: ReviewRequestStatus, rating?: number | null): Promise<ActionResult> {
-  try {
-    const st = z.enum(["draft", "sent", "clicked", "completed", "declined"]).parse(status);
-    const rt = z.number().int().min(1).max(5).nullish().parse(rating);
-    await (await getProvider()).updateReviewRequest(id, { status: st, ...(rt !== undefined ? { rating: rt } : {}) });
-    revalidatePath("/reviews");
-    return { ok: true, id };
   } catch (e) {
     return fail(e);
   }

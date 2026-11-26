@@ -28,7 +28,7 @@ const ROLE_INFO: Record<MemberRole, { label: string; icon: React.ElementType; su
     label: "User",
     icon: UserRound,
     summary: "Day-to-day work on the locations you give them.",
-    can: ["Reply to reviews and request reviews", "Create and schedule posts", "View performance and run the profile audit", "Only their assigned locations"],
+    can: ["Reply to reviews", "Create and schedule posts", "View performance and run the profile audit", "Only their assigned locations"],
   },
 };
 

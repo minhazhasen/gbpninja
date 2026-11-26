@@ -16,7 +16,7 @@ export default function PrivacyPage() {
         <ul>
           <li>We only use your data to run the features you use in {product}.</li>
           <li>We never sell your data, and we never use Google user data for advertising.</li>
-          <li>We don&apos;t access your Gmail. Review requests open in your own mail or messages app.</li>
+          <li>We don&apos;t access your Gmail or send email on your behalf.</li>
           <li>You can disconnect Google at any time, and delete your account and data.</li>
         </ul>
       </Section>
@@ -35,7 +35,7 @@ export default function PrivacyPage() {
           <strong>Google Search Console data</strong> (only if you connect it, with the read-only <code>webmasters.readonly</code> permission): search queries, clicks, impressions and positions for the website properties you choose.
         </p>
         <p>
-          <strong>Information you enter</strong>, such as message templates, review requests (customer name, email or phone number you provide), tasks, notes, posts you draft, and competitors you add.
+          <strong>Information you enter</strong>, such as reply templates, tasks, notes, posts you draft, and competitors you add.
         </p>
         <p>
           <strong>Technical information.</strong> A sign-in cookie that keeps you signed in, plus basic server logs (IP address, browser type, time of request) used for security and troubleshooting.

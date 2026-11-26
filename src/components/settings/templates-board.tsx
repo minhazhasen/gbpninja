@@ -1,6 +1,6 @@
 "use client";
 
-// Settings → Templates: review request emails, request texts and review replies. Editor has merge-field chips and a live preview.
+// Settings → Templates: review reply templates. Editor has merge-field chips and a live preview.
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow, parseISO } from "date-fns";
@@ -57,8 +57,9 @@ export function TemplatesBoard({ templates, businessName, initialKind }: { templ
   return (
     <div className="space-y-5">
       {dialog}
-      <Segmented
-        label="Template type"
+      {TEMPLATE_KINDS.length > 1 && (
+        <Segmented
+          label="Template type"
         value={kind}
         onChange={setKind}
         options={TEMPLATE_KINDS.map((k) => {
@@ -75,7 +76,8 @@ export function TemplatesBoard({ templates, businessName, initialKind }: { templ
             ),
           };
         })}
-      />
+        />
+      )}
 
       <Card className="overflow-hidden">
         <PanelHeader

@@ -118,11 +118,11 @@ a content calendar for posts, and a profile audit with in-app fixes.
   to public media and calls provider `addVideo`. Live: photos (audit and Media Library) and videos are created on Google with v4 `media`
   `sourceUrl` = the app's public link (`publicMediaUrl` / `/api/media/<name>`, which serves byte ranges), so uploads need the live site
   (refused on localhost); then `refreshPhotos(force)`. Demo keeps them in the app.
-- Settings has tabs via `?tab=` (page owns PageHeader + PillTabs): `accounts` (connections-board, Data sources), `templates` (`settings/templates-board.tsx`: request email / text / review-reply templates,
-  `src/lib/templates.ts` = kinds, merge fields `{{name}} {{full_name}} {{business}} {{link}}`, `mergeTemplate`, `replyFor`, starter set;
-  provider `listTemplates/saveTemplate/deleteTemplate`, one default per kind). Reviews uses them: the reply dialog's Templates menu
-  (best match for the rating first) and Request a review (template picker, editable subject/body; the app sends no email itself:
-  Open email = mailto with the plain review link, Open messages = sms:, or Copy message; `createReviewRequest` only records it). Account rows share `settings/account-grid.tsx`.
+- Settings has tabs via `?tab=` (page owns PageHeader + PillTabs): `accounts` (connections-board, Data sources), `templates` (`settings/templates-board.tsx`: review-reply templates,
+  `src/lib/templates.ts` = kinds, merge fields, `mergeTemplate`, `replyFor`, starter set; provider `listTemplates/saveTemplate/deleteTemplate`,
+  one default per kind). The reply dialog's Templates menu uses them (best match for the rating first). Review requests (Requests tab,
+  "Request reviews") were removed in Nov 2026: `TEMPLATE_KINDS` lists only `reply`; the `request_email/request_sms` kinds and the provider's
+  `listReviewRequests/createReviewRequest/updateReviewRequest` remain only for saved data and Admin → workspace stats. Account rows share `settings/account-grid.tsx`.
 - Facebook Page + Instagram (real when `META_APP_ID/SECRET/LOGIN_CONFIG_ID` are set, demo or live): `src/lib/meta/oauth.ts` — Facebook
   Login for Business with our configuration (`config_id`), callback `src/app/api/oauth/meta/callback` (`META_REDIRECT_URI`), long-lived
   user token + Page tokens (with linked Instagram business accounts) stored encrypted per workspace in the token table

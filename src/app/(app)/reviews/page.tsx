@@ -11,10 +11,9 @@ type Props = { searchParams: Promise<{ location?: string; filter?: string; revie
 export default async function ReviewsPage({ searchParams }: Props) {
   const { location, filter, review } = await searchParams;
   const provider = await getProvider();
-  const [locations, members, requests, templates] = await Promise.all([
+  const [locations, members, templates] = await Promise.all([
     provider.listLocations(),
     provider.listTeamMembers(),
-    provider.listReviewRequests(),
     provider.listTemplates(),
   ]);
   const titleOf = (id: string) => locations.find((l) => l.id === id)?.title ?? "Location";
@@ -35,7 +34,6 @@ export default async function ReviewsPage({ searchParams }: Props) {
       initialReviewId={review && reviews.some((r) => r.id === review) ? review : undefined}
       templates={templates}
       reviews={reviews}
-      requests={requests.map((r) => ({ ...r, locationTitle: titleOf(r.locationId) }))}
       members={members}
       locations={locations.map(({ id, title, placeId }) => ({ id, title, placeId }))}
       timeZone={timeZone}

@@ -6,32 +6,27 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { addDays, format, parseISO } from "date-fns";
 import { toast } from "sonner";
-import { ArrowDown, ArrowUp, ChevronDown, ChevronsUpDown, Download, Eye, EyeOff, Link2, MessageSquare, MessageSquareReply, MoreHorizontal, Search, Send, Star, Wrench } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, ChevronsUpDown, Download, Eye, EyeOff, Link2, MessageSquareReply, MoreHorizontal, Search, Star, Wrench } from "lucide-react";
 import { Card, PanelHeader, StatStrip, buttonClass, inputClass } from "@/components/ui";
-import { Menu, Segmented, SelectBox } from "@/components/ui-client";
+import { Menu, SelectBox } from "@/components/ui-client";
 import { ReviewTrendChart } from "./review-trend-chart";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { LocationMultiSelect } from "@/components/location-multi-select";
 import { GoogleIcon } from "@/components/marketing/channel-icon";
 import { ReviewAvatar, ReviewStars, StarBars } from "@/components/reviews/review-bits";
-import { RequestReviewDialog, ReviewDialog, type ReviewRow } from "@/components/reviews/review-dialogs";
-import { updateReview, updateReviewRequest } from "@/app/(app)/actions";
+import { ReviewDialog, type ReviewRow } from "@/components/reviews/review-dialogs";
+import { updateReview } from "@/app/(app)/actions";
 import { makeRange, previousRange, rangeLabel, type DateRangeValue } from "@/lib/date-ranges";
-import type { MessageTemplate, ReviewRequest, ReviewRequestStatus, TeamMember } from "@/lib/gbp/types";
+import type { MessageTemplate, TeamMember } from "@/lib/gbp/types";
 import { csvFilename } from "@/lib/csv";
 import { serializeLocationScope } from "@/lib/location-scope";
 import {
   FOLLOW_UP_LABEL,
-  METHOD_LABEL,
-  REQUEST_STATUSES,
-  STATUS_ACTION_LABEL,
   downloadCsv,
   isReplied,
   needsAttention,
   needsReply,
-  nextStatuses,
   pctDelta,
-  requestInfo,
   responseRate,
   reviewLink,
   reviewState,
@@ -40,7 +35,6 @@ import {
 } from "@/lib/reviews";
 import { cn } from "@/lib/utils";
 
-type View = "reviews" | "requests";
 type SortKey = "date" | "client" | "rating" | "member";
 type Sort = { key: SortKey; dir: 1 | -1 };
 const PAGE = 50;
@@ -55,7 +49,6 @@ export interface BoardLocation {
 
 export function ReviewsBoard({
   reviews: allReviews,
-  requests: allRequests,
   members,
   locations,
   timeZone,
@@ -66,7 +59,6 @@ export function ReviewsBoard({
 }: {
   templates: MessageTemplate[];
   reviews: ReviewRow[];
-  requests: (ReviewRequest & { locationTitle: string })[];
   members: TeamMember[];
   locations: BoardLocation[];
   /** The business's time zone, for counting reviews per day / month in its own calendar. */
@@ -82,10 +74,8 @@ export function ReviewsBoard({
   const pathname = usePathname();
 
   const reviews = useMemo(() => allReviews.filter((r) => scope.includes(r.locationId)), [allReviews, scope]);
-  const requests = useMemo(() => allRequests.filter((r) => scope.includes(r.locationId)), [allRequests, scope]);
 
   const [range, setRange] = useState<DateRangeValue>(() => makeRange("last90", true));
-  const [view, setView] = useState<View>("reviews");
   const [status, setStatus] = useState(initialStatus);
   const [search, setSearch] = useState("");
   const [member, setMember] = useState("all");
@@ -93,13 +83,8 @@ export function ReviewsBoard({
   const [source, setSource] = useState("all");
   const [sort, setSort] = useState<Sort>({ key: "date", dir: -1 });
   const [limit, setLimit] = useState(PAGE);
-  const [reqStatus, setReqStatus] = useState("all");
-  const [reqSearch, setReqSearch] = useState("");
 
   const [openReview, setOpenReview] = useState<{ id: string; focus?: "reply" | "followup" } | null>(initialReviewId ? { id: initialReviewId, focus: "followup" } : null);
-  const [askOpen, setAskOpen] = useState(false);
-  const [completing, setCompleting] = useState<ReviewRequest | null>(null);
-  const [completionRating, setCompletionRating] = useState("none");
 
   useEffect(() => setLimit(PAGE), [status, search, member, rating, source, scope]);
 
@@ -184,18 +169,6 @@ export function ReviewsBoard({
   const dist = useMemo(() => starDistribution(visible), [visible]);
   const allAvg = summarize(visible).avg;
 
-  // ------------------------------------------------------------ requests view
-  const reqBase = useMemo(() => {
-    const q = reqSearch.trim().toLowerCase();
-    return requests.filter((r) => !q || [r.name, r.email, r.phone, r.locationTitle].some((v) => v?.toLowerCase().includes(q)));
-  }, [requests, reqSearch]);
-  const reqCounts = useMemo(() => {
-    const c: Record<string, number> = { all: reqBase.length };
-    for (const r of reqBase) c[r.status] = (c[r.status] ?? 0) + 1;
-    return c;
-  }, [reqBase]);
-  const reqRows = useMemo(() => reqBase.filter((r) => reqStatus === "all" || r.status === reqStatus).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [reqBase, reqStatus]);
-
   // ------------------------------------------------------------ actions
   const onSort = (k: SortKey) => setSort((s) => (s.key === k ? { key: k, dir: s.dir === 1 ? -1 : 1 } : { key: k, dir: k === "client" || k === "member" ? 1 : -1 }));
   const refresh = () => router.refresh();
@@ -204,18 +177,6 @@ export function ReviewsBoard({
     const res = await updateReview(r.locationId, r.id, { hidden: !r.hidden });
     if (!res.ok) return void toast.error(res.error);
     toast.success(r.hidden ? "Review shown" : "Review hidden");
-    refresh();
-  };
-
-  const setRequestStatus = async (r: ReviewRequest, next: ReviewRequestStatus, rt?: number | null) => {
-    if (next === "completed" && rt === undefined) {
-      setCompletionRating("none");
-      setCompleting(r);
-      return;
-    }
-    const res = await updateReviewRequest(r.id, next, rt);
-    if (!res.ok) return void toast.error(res.error);
-    toast.success(`Marked as ${requestInfo(next).label.toLowerCase()}`);
     refresh();
   };
 
@@ -231,15 +192,6 @@ export function ReviewsBoard({
 
   const exportCsv = () => {
     const name = (what: string) => csvFilename(what, singleLocation?.title ?? (locations.length > 1 ? "all-locations" : locations[0]?.title), format(new Date(), "yyyy-MM-dd"));
-    if (view === "requests") {
-      if (!reqRows.length) return void toast.error("Nothing to export");
-      downloadCsv(name("review-requests"), [
-        ["Date", "Customer", "Email", "Phone", "Method", "Location", "Status", "Rating"],
-        ...reqRows.map((r) => [r.createdAt, r.name, r.email, r.phone, METHOD_LABEL[r.method], r.locationTitle, requestInfo(r.status).label, r.rating]),
-      ]);
-      toast.success(`Exported ${reqRows.length} rows`);
-      return;
-    }
     if (!rows.length) return void toast.error("Nothing to export");
     downloadCsv(name("reviews"), [
       ["Date", "Reviewer", "Location", "Rating", "Comment", "Team member", "Source", "Reply", "Replied at", "Follow-up", "Hidden"],
@@ -294,9 +246,8 @@ export function ReviewsBoard({
               </button>
             )}
             items={[
-              { label: "Request reviews", icon: Send, onSelect: () => setAskOpen(true) },
               { label: `Copy review link${linkFor && locations.length > 1 ? ` · ${linkFor.title}` : ""}`, icon: Link2, onSelect: copyLink },
-              { label: view === "requests" ? "Export requests (CSV)" : "Export reviews (CSV)", icon: Download, onSelect: exportCsv, separator: true },
+              { label: "Export reviews (CSV)", icon: Download, onSelect: exportCsv, separator: true },
             ]}
           />
         </div>
@@ -528,110 +479,6 @@ export function ReviewsBoard({
     </>
   );
 
-  const reqMenu = (r: ReviewRequest) => {
-    const items = nextStatuses(r.status).map((st) => ({
-      label: st === "sent" && r.status === "draft" ? "Mark as sent" : STATUS_ACTION_LABEL[st],
-      icon: st === "sent" ? Send : MessageSquare,
-      onSelect: () => void setRequestStatus(r, st),
-    }));
-    if (!items.length) return null;
-    return (
-      <Menu
-        label="Request actions"
-        trigger={(p) => (
-          <button type="button" {...p} className={buttonClass("ghost", "icon", "h-8 w-8")} aria-label="Request actions">
-            <MoreHorizontal />
-          </button>
-        )}
-        items={items}
-      />
-    );
-  };
-  const reqBadge = (r: ReviewRequest) => <span className={cn("whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold", requestInfo(r.status).tone)}>{requestInfo(r.status).label}</span>;
-
-  const requestsView = (
-    <>
-      <div className="border-b px-3 py-3">
-        {pills(
-          [{ key: "all", label: "All", count: reqCounts.all, pinned: true }, ...REQUEST_STATUSES.map((st) => ({ key: st.key, label: st.label, count: reqCounts[st.key] ?? 0, dot: st.dot }))],
-          reqStatus,
-          setReqStatus,
-        )}
-      </div>
-      <div className="flex flex-col gap-2 border-b bg-muted/20 px-3 py-2.5 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={reqSearch}
-            onChange={(e) => setReqSearch(e.target.value)}
-            placeholder="Search customer, email, phone…"
-            aria-label="Search requests"
-            className={cn(inputClass, "h-9 py-1.5 pl-9")}
-          />
-        </div>
-        <button type="button" className={buttonClass("default", "sm", "h-9")} onClick={() => setAskOpen(true)}>
-          <Send /> Request reviews
-        </button>
-      </div>
-      {reqRows.length === 0 ? (
-        <p className="py-14 text-center text-sm text-muted-foreground">{requests.length ? "Nothing here" : "No review requests yet — send your first one."}</p>
-      ) : (
-        <>
-          <ul className="divide-y xl:hidden">
-            {reqRows.map((r) => (
-              <li key={r.id} className="flex items-center gap-3 px-4 py-3">
-                <ReviewAvatar name={r.name} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{r.name}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {fmtDate(r.sentAt ?? r.createdAt)} · {METHOD_LABEL[r.method]}
-                  </span>
-                </span>
-                {reqBadge(r)}
-                {reqMenu(r)}
-              </li>
-            ))}
-          </ul>
-          <div className="hidden overflow-x-auto xl:block">
-            <table className="w-full min-w-[820px] text-sm">
-              <thead className="border-b text-left text-xs text-muted-foreground">
-                <tr>
-                  {["Customer", "Location", "Sent by", "Date", "Status", "Rating"].map((h, i) => (
-                    <th key={h} className={cn("whitespace-nowrap px-3 py-2.5 font-semibold", i === 0 && "pl-4")}>
-                      {h}
-                    </th>
-                  ))}
-                  <th className="w-[60px]" />
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {reqRows.map((r) => (
-                  <tr key={r.id} className="transition-colors hover:bg-muted/40">
-                    <td className="py-3 pl-4 pr-3">
-                      <div className="flex items-center gap-3">
-                        <ReviewAvatar name={r.name} />
-                        <div className="min-w-0">
-                          <p className="max-w-[200px] truncate font-semibold">{r.name}</p>
-                          <p className="max-w-[200px] truncate text-xs text-muted-foreground">{r.email || r.phone || "—"}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="max-w-[180px] truncate px-3 py-3 text-xs">{r.locationTitle}</td>
-                    <td className="px-3 py-3 text-xs">{METHOD_LABEL[r.method]}</td>
-                    <td className="whitespace-nowrap px-3 py-3 text-xs text-muted-foreground">{fmtDate(r.sentAt ?? r.createdAt)}</td>
-                    <td className="px-3 py-3">{reqBadge(r)}</td>
-                    <td className="px-3 py-3">{r.rating ? <ReviewStars rating={r.rating} /> : <span className="text-muted-foreground/50">—</span>}</td>
-                    <td className="pr-3 text-right">{reqMenu(r)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </>
-  );
-
   const s = overview.summary;
 
   return (
@@ -654,10 +501,9 @@ export function ReviewsBoard({
             value: overview.unreplied,
             hint: "All time",
             onClick: () => {
-              setView("reviews");
-              setStatus(status === "reply" && view === "reviews" ? "all" : "reply");
+              setStatus(status === "reply" ? "all" : "reply");
             },
-            active: view === "reviews" && status === "reply",
+            active: status === "reply",
           },
           {
             label: "Low ratings",
@@ -665,10 +511,9 @@ export function ReviewsBoard({
             hint: overview.attention ? "≤3★ not handled" : "All handled",
             alert: overview.attention > 0,
             onClick: () => {
-              setView("reviews");
-              setStatus(status === "attention" && view === "reviews" ? "all" : "attention");
+              setStatus(status === "attention" ? "all" : "attention");
             },
-            active: view === "reviews" && status === "attention",
+            active: status === "attention",
           },
         ]}
       />
@@ -682,7 +527,6 @@ export function ReviewsBoard({
               dist={dist}
               active={rating === "all" ? null : Number(rating)}
               onPick={(n) => {
-                setView("reviews");
                 setRating(rating === String(n) ? "all" : String(n));
               }}
             />
@@ -692,77 +536,10 @@ export function ReviewsBoard({
       )}
 
       <Card className="overflow-hidden">
-        <div className="border-b px-3 py-2.5">
-          <Segmented
-            label="View"
-            value={view}
-            onChange={setView}
-            options={[
-              {
-                value: "reviews",
-                label: (
-                  <>
-                    <Star className="h-3.5 w-3.5" /> Reviews
-                  </>
-                ),
-              },
-              {
-                value: "requests",
-                label: (
-                  <>
-                    <Send className="h-3.5 w-3.5" /> Requests
-                  </>
-                ),
-              },
-            ]}
-          />
-        </div>
-        {view === "requests" ? requestsView : reviewsView}
+        {reviewsView}
       </Card>
 
       <ReviewDialog review={current} open={!!current} onClose={() => setOpenReview(null)} members={members} focus={openReview?.focus} templates={templates} />
-      <RequestReviewDialog
-        open={askOpen}
-        onClose={() => setAskOpen(false)}
-        locations={locations}
-        defaultLocationId={singleLocation?.id ?? locations[0]?.id ?? ""}
-        templates={templates}
-      />
-
-      {completing &&
-        (() => {
-          const done = async () => {
-            await setRequestStatus(completing, "completed", completionRating === "none" ? null : Number(completionRating));
-            setCompleting(null);
-          };
-          return (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-              <div className="absolute inset-0 bg-black/50" onClick={() => setCompleting(null)} />
-              <div role="dialog" aria-modal="true" aria-labelledby="complete-title" className="relative w-full max-w-sm space-y-4 rounded-2xl border bg-card p-5 shadow-elegant">
-                <h2 id="complete-title" className="text-base font-semibold">
-                  Mark as reviewed
-                </h2>
-                <div className="space-y-1.5">
-                  <span className="label-caps block">Rating they left</span>
-                  <SelectBox
-                    label="Rating"
-                    value={completionRating}
-                    onChange={setCompletionRating}
-                    options={[{ value: "none", label: "Not known" }, ...[5, 4, 3, 2, 1].map((n) => ({ value: String(n), label: `${n} star${n > 1 ? "s" : ""}` }))]}
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button type="button" className={buttonClass("outline")} onClick={() => setCompleting(null)}>
-                    Cancel
-                  </button>
-                  <button type="button" className={buttonClass()} onClick={done}>
-                    Save
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
     </div>
   );
 }
